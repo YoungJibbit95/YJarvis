@@ -90,3 +90,69 @@ def test_heuristic_calendar_without_explicit_calendar_word():
     assert intent.tool_input["duration_minutes"] == 45
     assert intent.tool_input["title"].lower() == "daily standup"
     assert "start_at" in intent.tool_input
+
+
+def test_heuristic_notes_create_detected():
+    intent = infer_heuristic_tool_call("erstelle bitte eine Notiz mit Titel Einkaufsliste die sagt Milch und Brot")
+
+    assert intent is not None
+    assert intent.tool_name == "notes_create"
+    assert "einkaufsliste" in intent.tool_input["title"].lower()
+
+
+def test_heuristic_notes_search_detected():
+    intent = infer_heuristic_tool_call("suche in notizen nach projekt phoenix 5")
+
+    assert intent is not None
+    assert intent.tool_name == "notes_search"
+    assert "projekt phoenix" in intent.tool_input["query"].lower()
+
+
+def test_heuristic_contacts_search_detected():
+    intent = infer_heuristic_tool_call("suche kontakt Max Mustermann")
+
+    assert intent is not None
+    assert intent.tool_name == "contacts_search"
+    assert "max mustermann" in intent.tool_input["query"].lower()
+
+
+def test_heuristic_mail_draft_detected():
+    intent = infer_heuristic_tool_call(
+        "mail entwurf an test@example.com betreff Projekt Update: Hallo Team bitte final prüfen"
+    )
+
+    assert intent is not None
+    assert intent.tool_name == "mail_create_draft"
+    assert intent.tool_input["to"] == "test@example.com"
+    assert "projekt update" in intent.tool_input["subject"].lower()
+
+
+def test_heuristic_messages_send_detected():
+    intent = infer_heuristic_tool_call("sende nachricht an +49123456789: Bitte Licht ausmachen")
+
+    assert intent is not None
+    assert intent.tool_name == "messages_send"
+    assert intent.tool_input["to"] == "+49123456789"
+
+
+def test_heuristic_music_control_detected():
+    intent = infer_heuristic_tool_call("musik pausieren")
+
+    assert intent is not None
+    assert intent.tool_name == "music_control"
+    assert intent.tool_input["action"] == "pause"
+
+
+def test_heuristic_reminder_list_detected():
+    intent = infer_heuristic_tool_call("zeige erinnerungen 6")
+
+    assert intent is not None
+    assert intent.tool_name == "reminder_list"
+    assert intent.tool_input["limit"] == 6
+
+
+def test_heuristic_calendar_list_detected():
+    intent = infer_heuristic_tool_call("zeige termine 14")
+
+    assert intent is not None
+    assert intent.tool_name == "calendar_list_events"

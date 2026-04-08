@@ -56,6 +56,15 @@ CALENDAR_TEMPORAL_HINT_WORDS = (
     "samstag",
     "sonntag",
 )
+NOTES_HINT_WORDS = ("notiz", "notizen", "note", "notes")
+NOTES_CREATE_HINTS = ("erstell", "erzeuge", "lege", "notiere", "schreib", "create", "new")
+NOTES_SEARCH_HINTS = ("suche", "finde", "zeige", "list", "search")
+REMINDER_LIST_HINTS = ("zeige erinnerungen", "liste erinnerungen", "offene erinnerungen", "reminders list")
+CALENDAR_LIST_HINTS = ("zeige termine", "liste termine", "kommende termine", "upcoming events")
+CONTACT_HINT_WORDS = ("kontakt", "kontakte", "contact", "contacts")
+MAIL_HINT_WORDS = ("mail", "email", "e-mail")
+MESSAGE_HINT_WORDS = ("nachricht", "imessage", "sms", "message")
+MUSIC_HINT_WORDS = ("musik", "music")
 
 
 def _extract_quoted(text: str) -> str | None:
@@ -164,6 +173,158 @@ def _infer_clipboard_write_text(message: str) -> str:
             return candidate
 
     return _trim_trailing_polite_words(_collapse_whitespace(message))
+
+
+def _extract_limit_value(message: str, *, default: int = 8, minimum: int = 1, maximum: int = 30) -> int:
+    match = re.search(r"(?i)\b(\d{1,2})\b", message)
+    if not match:
+        return default
+    value = _safe_int(match.group(1), default)
+    return max(minimum, min(maximum, value))
+
+
+def _infer_notes_tool_input(message: str) -> dict[str, Any]:
+    quoted = _extract_quoted(message)
+    folder_match = re.search(r"(?i)\b(?:in|im)\s+(?:ordner|folder)\s+([a-zA-Z0-9 _-]+)", message)
+    folder = _trim_trailing_polite_words(folder_match.group(1)) if folder_match else ""
+
+    title = ""
+    title_match = re.search(r"(?i)\b(?:mit\s+titel|titel)\s*[:\-]?\s*([^,:;\n]+)", message)
+    if title_match:
+        title = _trim_trailing_polite_words(title_match.group(1))
+
+    content = quoted or ""
+    if not content:
+        content_match = re.search(r"(?is)\b(?:notiz|note)\b.*?(?:dass|mit(?:\s+dem)?\s+inhalt|text|lautet)\s*[:\-]?\s*(.+)$", message)
+        if content_match:
+            content = _trim_trailing_polite_words(_collapse_whitespace(content_match.group(1)))
+
+    if not content and not title:
+        sanitized = re.sub(
+            r"(?i)\b(?:jarvis|bitte|erstell(?:e)?|erzeuge|lege|notiere|schreibe|mach(?:\s+mir)?|"
+            r"eine?|neue?|new|create|notiz|notizen|note|notes)\b",
+            " ",
+            message,
+        )
+        fallback = _trim_trailing_polite_words(_collapse_whitespace(sanitized))
+        content = fallback
+
+    if not title:
+        base = content or "Neue Notiz"
+        title = _collapse_whitespace(base)[:80].strip() or "Neue Notiz"
+
+    payload: dict[str, Any] = {
+        "title": title,
+        "content": content or title,
+    }
+    if folder:
+        payload["folder"] = folder
+    return payload
+
+
+def _infer_notes_search_input(message: str) -> dict[str, Any]:
+    quoted = _extract_quoted(message)
+    query = quoted or ""
+    if not query:
+        query_match = re.search(
+            r"(?is)\b(?:suche|finde|search|zeige|list(?:e)?)\b.*?\b(?:in|bei)?\s*(?:notiz(?:en)?|note(?:s)?)\b\s*(?:nach)?\s*(.+)$",
+            message,
+        )
+        if query_match:
+            query = _trim_trailing_polite_words(_collapse_whitespace(query_match.group(1)))
+
+    payload: dict[str, Any] = {
+        "query": query,
+        "limit": _extract_limit_value(message, default=8, minimum=1, maximum=25),
+    }
+    return payload
+
+
+def _infer_mail_draft_input(message: str) -> dict[str, Any]:
+    to_match = re.search(r"(?i)\b(?:an|to)\s+([^\s,;:]+@[^\s,;:]+)", message)
+    recipient = to_match.group(1).strip() if to_match else ""
+
+    subject = ""
+    subject_match = re.search(r"(?is)\b(?:betreff|subject)\s*[:\-]?\s*([^:;\n]+)", message)
+    if subject_match:
+        subject = _trim_trailing_polite_words(_collapse_whitespace(subject_match.group(1)))
+
+    quoted = _extract_quoted(message)
+    body = quoted or ""
+    if not body:
+        body_match = re.search(r"(?is)\b(?:inhalt|text|body|mit)\s*[:\-]?\s*(.+)$", message)
+        if body_match:
+            body = _trim_trailing_polite_words(_collapse_whitespace(body_match.group(1)))
+
+    if not subject:
+        subject = "Neue Nachricht"
+    if not body:
+        body = "Hallo,\n\n"
+
+    payload: dict[str, Any] = {
+        "subject": subject,
+        "content": body,
+    }
+    if recipient:
+        payload["to"] = recipient
+    return payload
+
+
+def _infer_message_send_input(message: str) -> dict[str, Any] | None:
+    pattern = re.search(
+        r"(?is)\b(?:sende|schick(?:e)?)\s+(?:eine?\s+)?(?:nachricht|message)\s+an\s+([^:,\n]+?)\s*[:\-]\s*(.+)$",
+        message,
+    )
+    if not pattern:
+        return None
+
+    recipient = _trim_trailing_polite_words(_collapse_whitespace(pattern.group(1)))
+    text = _trim_trailing_polite_words(_collapse_whitespace(pattern.group(2)))
+    if not recipient or not text:
+        return None
+
+    return {"to": recipient, "text": text}
+
+
+def _infer_contacts_search_input(message: str) -> dict[str, Any]:
+    quoted = _extract_quoted(message)
+    query = quoted or ""
+    if not query:
+        query_match = re.search(r"(?is)\b(?:kontakt(?:e)?|contact(?:s)?)\b\s*(.+)$", message)
+        if query_match:
+            query = _trim_trailing_polite_words(_collapse_whitespace(query_match.group(1)))
+
+    return {
+        "query": query,
+        "limit": _extract_limit_value(message, default=6, minimum=1, maximum=20),
+    }
+
+
+def _infer_reminder_list_input(message: str) -> dict[str, Any]:
+    return {
+        "limit": _extract_limit_value(message, default=8, minimum=1, maximum=25),
+    }
+
+
+def _infer_calendar_list_input(message: str) -> dict[str, Any]:
+    days_ahead = _extract_limit_value(message, default=7, minimum=1, maximum=60)
+    return {
+        "days_ahead": days_ahead,
+        "limit": _extract_limit_value(message, default=10, minimum=1, maximum=30),
+    }
+
+
+def _infer_music_control_input(message: str) -> dict[str, Any] | None:
+    lowered = message.lower()
+    if any(word in lowered for word in ("pause", "pausier", "anhalten", "stop")):
+        return {"action": "pause"}
+    if any(word in lowered for word in ("weiter", "fortsetzen", "resume", "play")):
+        return {"action": "play"}
+    if any(word in lowered for word in ("naechst", "nächst", "next", "skip")):
+        return {"action": "next"}
+    if any(word in lowered for word in ("vorher", "zurueck", "zurück", "previous")):
+        return {"action": "previous"}
+    return None
 
 
 def _extract_due_components(text: str) -> tuple[str | None, str | None, list[tuple[int, int]]]:
@@ -469,6 +630,79 @@ def infer_heuristic_tool_call(user_message: str) -> ToolCallIntent | None:
     if explicit:
         return explicit
 
+    if any(hint in lowered for hint in REMINDER_LIST_HINTS):
+        return ToolCallIntent(
+            tool_name="reminder_list",
+            tool_input=_infer_reminder_list_input(message),
+            reason="Erinnerungsliste erkannt",
+        )
+
+    if any(hint in lowered for hint in CALENDAR_LIST_HINTS):
+        return ToolCallIntent(
+            tool_name="calendar_list_events",
+            tool_input=_infer_calendar_list_input(message),
+            reason="Kalenderliste erkannt",
+        )
+
+    has_notes_hint = any(word in lowered for word in NOTES_HINT_WORDS)
+    notes_search_action = re.search(r"(?i)\b(?:suche|finde|zeige|liste|list|search)\b", lowered) is not None
+    notes_create_action = re.search(
+        r"(?i)\b(?:erstell(?:e)?|erzeuge|lege|notiere|schreib(?:e)?|create|new)\b",
+        lowered,
+    ) is not None
+
+    if has_notes_hint and notes_search_action:
+        return ToolCallIntent(
+            tool_name="notes_search",
+            tool_input=_infer_notes_search_input(message),
+            reason="Notizen-Suche erkannt",
+        )
+
+    if has_notes_hint and notes_create_action:
+        return ToolCallIntent(
+            tool_name="notes_create",
+            tool_input=_infer_notes_tool_input(message),
+            reason="Notiz erstellen erkannt",
+        )
+
+    if any(word in lowered for word in CONTACT_HINT_WORDS) and re.search(
+        r"(?i)\b(?:suche|finde|zeige|liste|list|search)\b", lowered
+    ):
+        return ToolCallIntent(
+            tool_name="contacts_search",
+            tool_input=_infer_contacts_search_input(message),
+            reason="Kontaktsuche erkannt",
+        )
+
+    if any(word in lowered for word in MAIL_HINT_WORDS) and re.search(
+        r"(?i)\b(?:entwurf|draft|schreib(?:e)?|verfass(?:e)?|compose)\b", lowered
+    ):
+        return ToolCallIntent(
+            tool_name="mail_create_draft",
+            tool_input=_infer_mail_draft_input(message),
+            reason="Mail-Entwurf erkannt",
+        )
+
+    if any(word in lowered for word in MESSAGE_HINT_WORDS) and re.search(
+        r"(?i)\b(?:sende|schick(?:e)?|send)\b", lowered
+    ):
+        message_payload = _infer_message_send_input(message)
+        if message_payload:
+            return ToolCallIntent(
+                tool_name="messages_send",
+                tool_input=message_payload,
+                reason="Nachricht senden erkannt",
+            )
+
+    if any(word in lowered for word in MUSIC_HINT_WORDS):
+        music_payload = _infer_music_control_input(message)
+        if music_payload:
+            return ToolCallIntent(
+                tool_name="music_control",
+                tool_input=music_payload,
+                reason="Musiksteuerung erkannt",
+            )
+
     url_match = URL_RE.search(message)
     if url_match and ("oeffne" in lowered or "öffne" in lowered):
         return ToolCallIntent(
@@ -502,7 +736,11 @@ def infer_heuristic_tool_call(user_message: str) -> ToolCallIntent | None:
             reason="Clipboard Write erkannt",
         )
 
-    if any(trigger in lowered for trigger in ["erinnerung", "erinner mich", "remind me"]):
+    if (
+        "erinner mich" in lowered
+        or "remind me" in lowered
+        or ("erinnerung" in lowered and not any(hint in lowered for hint in ("zeige erinner", "liste erinner", "offene erinner")))
+    ):
         return ToolCallIntent(
             tool_name="reminder_create",
             tool_input=_infer_reminder_tool_input(message),

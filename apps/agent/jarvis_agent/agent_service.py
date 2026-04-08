@@ -148,8 +148,9 @@ def _quick_local_reply(user_message: str) -> str | None:
 
     if re.search(r"\b(help|hilfe|was kannst du|capabilities|funktionen)\b", lowered):
         return (
-            "Ich kann lokal Chat, Erinnerungen, Kalendertermine, App/URL-Start, Zwischenablage sowie sichere Dateiaktionen "
-            "mit Freigaben ausfuehren. Nennen Sie Aufgabe plus Zeit/Ziel, dann uebernehme ich den Rest."
+            "Ich kann lokal Chat, Notizen, Erinnerungen, Kalender, Kontakte, Mail-Entwuerfe, Nachrichten, Musiksteuerung, "
+            "App/URL-Start, Zwischenablage sowie sichere Dateiaktionen mit Freigaben ausfuehren. "
+            "Nennen Sie Aufgabe plus Zeit/Ziel, dann uebernehme ich den Rest."
         )
 
     return None

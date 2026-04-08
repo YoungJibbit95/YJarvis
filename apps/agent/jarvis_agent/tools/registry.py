@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from .applescript_tools import CalendarCreateEventTool, ReminderCreateTool
+from .applescript_tools import (
+    CalendarCreateEventTool,
+    CalendarListEventsTool,
+    ContactsSearchTool,
+    MailCreateDraftTool,
+    MessagesSendTool,
+    MusicControlTool,
+    NotesCreateTool,
+    NotesSearchTool,
+    ReminderCreateTool,
+    ReminderListTool,
+)
 from .base import BaseTool, ToolContext, ToolResult
 from .file_tools import FileReadTool, FileWriteTool
 from .system_tools import ClipboardReadTool, ClipboardWriteTool, OpenAppTool, OpenUrlTool
@@ -16,7 +27,15 @@ class ToolRegistry:
         self._register(ClipboardReadTool())
         self._register(ClipboardWriteTool())
         self._register(ReminderCreateTool())
+        self._register(ReminderListTool())
         self._register(CalendarCreateEventTool())
+        self._register(CalendarListEventsTool())
+        self._register(NotesCreateTool())
+        self._register(NotesSearchTool())
+        self._register(MailCreateDraftTool())
+        self._register(MessagesSendTool())
+        self._register(ContactsSearchTool())
+        self._register(MusicControlTool())
         self._register(FileReadTool())
         self._register(FileWriteTool())
 
