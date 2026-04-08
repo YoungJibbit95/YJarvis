@@ -1,5 +1,7 @@
 # YJarvis Local v1
 
+![Repository Views](https://komarev.com/ghpvc/?username=YoungJibbit95&repo=YJarvis&label=Repository%20Views&color=0e75b6&style=flat)
+
 A fully local desktop assistant for macOS (Apple Silicon). No cloud calls.
 
 ## Stack
