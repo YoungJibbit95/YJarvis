@@ -16,7 +16,14 @@ from .applescript_tools import (
 )
 from .base import BaseTool, ToolContext, ToolResult
 from .file_tools import FileReadTool, FileWriteTool
-from .system_tools import ClipboardReadTool, ClipboardWriteTool, OpenAppTool, OpenUrlTool
+from .system_tools import (
+    ClipboardReadTool,
+    ClipboardWriteTool,
+    OpenAppTool,
+    OpenUrlTool,
+    RaycastOpenTool,
+    RaycastRunCommandTool,
+)
 
 
 class ToolRegistry:
@@ -24,6 +31,8 @@ class ToolRegistry:
         self._tools: dict[str, BaseTool] = {}
         self._register(OpenUrlTool())
         self._register(OpenAppTool())
+        self._register(RaycastOpenTool())
+        self._register(RaycastRunCommandTool())
         self._register(ClipboardReadTool())
         self._register(ClipboardWriteTool())
         self._register(ReminderCreateTool())

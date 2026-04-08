@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,11 @@ import aiosqlite
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def normalize_learned_trigger(value: str) -> str:
+    collapsed = re.sub(r"\s+", " ", str(value or "").strip().lower())
+    return collapsed.strip(" ,.:;!?")
 
 
 DEFAULT_SETTINGS = {
@@ -167,6 +173,27 @@ class Database:
                     attributes TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS learned_commands (
+                    trigger TEXT PRIMARY KEY,
+                    tool_name TEXT NOT NULL,
+                    tool_input TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    usage_count INTEGER NOT NULL DEFAULT 0,
+                    success_count INTEGER NOT NULL DEFAULT 0,
+                    failure_count INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS tool_learning_stats (
+                    tool_name TEXT PRIMARY KEY,
+                    success_count INTEGER NOT NULL DEFAULT 0,
+                    failure_count INTEGER NOT NULL DEFAULT 0,
+                    average_latency_ms REAL NOT NULL DEFAULT 0,
+                    last_latency_ms INTEGER NOT NULL DEFAULT 0,
+                    last_used_at TEXT
+                );
+
                 CREATE VIRTUAL TABLE IF NOT EXISTS memory_items_fts
                 USING fts5(content, content='memory_items', content_rowid='id');
 
@@ -225,6 +252,269 @@ class Database:
                     )
 
             await connection.commit()
+
+    async def upsert_learned_command(
+        self,
+        *,
+        trigger: str,
+        tool_name: str,
+        tool_input: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized_trigger = normalize_learned_trigger(trigger)
+        if not normalized_trigger:
+            raise ValueError("trigger darf nicht leer sein")
+
+        created_or_updated_at = utc_now_iso()
+        async with self._connect() as connection:
+            await connection.execute(
+                """
+                INSERT INTO learned_commands(
+                    trigger, tool_name, tool_input, created_at, updated_at, enabled
+                )
+                VALUES (?, ?, ?, ?, ?, 1)
+                ON CONFLICT(trigger) DO UPDATE SET
+                    tool_name = excluded.tool_name,
+                    tool_input = excluded.tool_input,
+                    updated_at = excluded.updated_at,
+                    enabled = 1
+                """,
+                (
+                    normalized_trigger,
+                    tool_name,
+                    json.dumps(tool_input),
+                    created_or_updated_at,
+                    created_or_updated_at,
+                ),
+            )
+            await connection.commit()
+
+        command = await self.get_learned_command(normalized_trigger)
+        if command is None:
+            raise ValueError("gelernter Befehl konnte nicht gespeichert werden")
+        return command
+
+    async def get_learned_command(self, trigger: str) -> dict[str, Any] | None:
+        normalized_trigger = normalize_learned_trigger(trigger)
+        if not normalized_trigger:
+            return None
+
+        async with self._connect() as connection:
+            row = await self._fetchone(
+                connection,
+                """
+                SELECT trigger, tool_name, tool_input, created_at, updated_at,
+                       enabled, usage_count, success_count, failure_count
+                FROM learned_commands
+                WHERE trigger = ?
+                """,
+                (normalized_trigger,),
+            )
+
+        if row is None:
+            return None
+
+        parsed = dict(row)
+        parsed["tool_input"] = json.loads(parsed["tool_input"])
+        parsed["enabled"] = bool(parsed["enabled"])
+        return parsed
+
+    async def find_matching_learned_command(self, user_message: str) -> dict[str, Any] | None:
+        normalized_message = normalize_learned_trigger(user_message)
+        if not normalized_message:
+            return None
+
+        async with self._connect() as connection:
+            rows = await self._fetchall(
+                connection,
+                """
+                SELECT trigger, tool_name, tool_input, created_at, updated_at,
+                       enabled, usage_count, success_count, failure_count
+                FROM learned_commands
+                WHERE enabled = 1
+                ORDER BY LENGTH(trigger) DESC, updated_at DESC
+                LIMIT 200
+                """,
+            )
+
+        for row in rows:
+            trigger = str(row["trigger"]).strip()
+            if not trigger:
+                continue
+
+            if normalized_message == trigger or normalized_message.startswith(f"{trigger} "):
+                parsed = dict(row)
+                parsed["tool_input"] = json.loads(parsed["tool_input"])
+                parsed["enabled"] = bool(parsed["enabled"])
+                return parsed
+
+        return None
+
+    async def list_learned_commands(self, limit: int = 40) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(int(limit), 200))
+        async with self._connect() as connection:
+            rows = await self._fetchall(
+                connection,
+                """
+                SELECT trigger, tool_name, tool_input, created_at, updated_at,
+                       enabled, usage_count, success_count, failure_count
+                FROM learned_commands
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (safe_limit,),
+            )
+
+        commands: list[dict[str, Any]] = []
+        for row in rows:
+            parsed = dict(row)
+            parsed["tool_input"] = json.loads(parsed["tool_input"])
+            parsed["enabled"] = bool(parsed["enabled"])
+            commands.append(parsed)
+        return commands
+
+    async def delete_learned_command(self, trigger: str) -> bool:
+        normalized_trigger = normalize_learned_trigger(trigger)
+        if not normalized_trigger:
+            return False
+
+        async with self._connect() as connection:
+            cursor = await connection.execute(
+                "DELETE FROM learned_commands WHERE trigger = ?",
+                (normalized_trigger,),
+            )
+            await connection.commit()
+            deleted = cursor.rowcount > 0
+            await cursor.close()
+        return deleted
+
+    async def record_learned_command_result(self, trigger: str, success: bool) -> None:
+        normalized_trigger = normalize_learned_trigger(trigger)
+        if not normalized_trigger:
+            return
+
+        success_delta = 1 if success else 0
+        failure_delta = 0 if success else 1
+
+        async with self._connect() as connection:
+            await connection.execute(
+                """
+                UPDATE learned_commands
+                SET usage_count = usage_count + 1,
+                    success_count = success_count + ?,
+                    failure_count = failure_count + ?,
+                    updated_at = ?
+                WHERE trigger = ?
+                """,
+                (success_delta, failure_delta, utc_now_iso(), normalized_trigger),
+            )
+            await connection.commit()
+
+    async def record_tool_learning(
+        self,
+        *,
+        tool_name: str,
+        success: bool,
+        latency_ms: int,
+    ) -> None:
+        normalized_tool_name = str(tool_name or "").strip()
+        if not normalized_tool_name:
+            return
+
+        normalized_latency = max(0, int(latency_ms))
+
+        async with self._connect() as connection:
+            row = await self._fetchone(
+                connection,
+                """
+                SELECT success_count, failure_count, average_latency_ms
+                FROM tool_learning_stats
+                WHERE tool_name = ?
+                """,
+                (normalized_tool_name,),
+            )
+
+            current_success = 0
+            current_failure = 0
+            current_average = 0.0
+            if row is not None:
+                current_success = int(row["success_count"])
+                current_failure = int(row["failure_count"])
+                current_average = float(row["average_latency_ms"])
+
+            total_runs = current_success + current_failure
+            new_average = (
+                ((current_average * total_runs) + normalized_latency) / float(total_runs + 1)
+                if total_runs >= 0
+                else float(normalized_latency)
+            )
+
+            success_delta = 1 if success else 0
+            failure_delta = 0 if success else 1
+            now = utc_now_iso()
+
+            await connection.execute(
+                """
+                INSERT INTO tool_learning_stats(
+                    tool_name,
+                    success_count,
+                    failure_count,
+                    average_latency_ms,
+                    last_latency_ms,
+                    last_used_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(tool_name) DO UPDATE SET
+                    success_count = excluded.success_count,
+                    failure_count = excluded.failure_count,
+                    average_latency_ms = excluded.average_latency_ms,
+                    last_latency_ms = excluded.last_latency_ms,
+                    last_used_at = excluded.last_used_at
+                """,
+                (
+                    normalized_tool_name,
+                    current_success + success_delta,
+                    current_failure + failure_delta,
+                    new_average,
+                    normalized_latency,
+                    now,
+                ),
+            )
+            await connection.commit()
+
+    async def get_tool_learning_stats(
+        self,
+        *,
+        tool_names: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        async with self._connect() as connection:
+            if tool_names:
+                cleaned = [str(item).strip() for item in tool_names if str(item).strip()]
+                if not cleaned:
+                    return []
+                placeholders = ",".join("?" for _ in cleaned)
+                rows = await self._fetchall(
+                    connection,
+                    f"""
+                    SELECT tool_name, success_count, failure_count,
+                           average_latency_ms, last_latency_ms, last_used_at
+                    FROM tool_learning_stats
+                    WHERE tool_name IN ({placeholders})
+                    """,
+                    tuple(cleaned),
+                )
+            else:
+                rows = await self._fetchall(
+                    connection,
+                    """
+                    SELECT tool_name, success_count, failure_count,
+                           average_latency_ms, last_latency_ms, last_used_at
+                    FROM tool_learning_stats
+                    ORDER BY (success_count + failure_count) DESC, tool_name ASC
+                    LIMIT 200
+                    """,
+                )
+
+        return [dict(row) for row in rows]
 
     async def create_session(self, session_id: str) -> None:
         async with self._connect() as connection:

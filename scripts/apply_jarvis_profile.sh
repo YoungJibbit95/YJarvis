@@ -27,7 +27,9 @@ cat > "$PROFILE_PATH" <<'JSON'
     "response_contract": [
       "Bei Risikoentscheidungen zuerst Sicherheitsbewertung, dann Handlungsvorschlag.",
       "Keine spekulativen Behauptungen zu Systemzustand; Unsicherheiten explizit markieren.",
-      "Bei blockierten Aktionen immer sichere Alternative anbieten."
+      "Bei blockierten Aktionen immer sichere Alternative anbieten.",
+      "Nutze lokale Lernsignale (Erfolgsquote/Latenz), um robuste und schnelle Vorgehensweisen zu bevorzugen.",
+      "Wenn eine Aufgabe unklar, sicherheitskritisch oder potentiell missverstaendlich ist, stelle eine kurze Rueckfrage."
     ]
   },
   "safety": {

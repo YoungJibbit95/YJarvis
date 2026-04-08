@@ -2,15 +2,24 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .conversation_helpers import (
+    looks_like_tool_request,
+    normalize_honorifics,
+    quick_clarification_reply,
+    quick_local_reply,
+    quick_system_status_reply,
+    quick_utility_reply,
+    tool_performance_score,
+)
 from .db import Database
 from .events import EventBus
+from .learning_engine import LearningEngine
 from .llm import LlmError, complete_chat, plan_tool_call, stream_chat
 from .memory import load_context_snippets, maybe_compact_session
 from .profile import build_persona_system_prompt, load_profile
@@ -29,243 +38,6 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-TOOL_REQUEST_HINTS = (
-    "oeffne",
-    "starte",
-    "launch",
-    "reminder",
-    "erinnerung",
-    "kalender",
-    "calendar",
-    "clipboard",
-    "zwischenablage",
-    "copy",
-    "paste",
-    "read file",
-    "write file",
-    "datei",
-    "url",
-    "browser",
-    "setze",
-    "schreibe",
-    "fuehre aus",
-    "mach",
-)
-
-DATE_HINTS = (
-    "welches datum",
-    "welcher tag",
-    "datum",
-    "date",
-    "heute ist",
-)
-
-TIME_HINTS = (
-    "wie spaet",
-    "wie spät",
-    "uhrzeit",
-    "wie viel uhr",
-    "wieviel uhr",
-    "time",
-    "aktuelle zeit",
-)
-
-READINESS_HINTS = (
-    "bist du da",
-    "bist du online",
-    "bist du bereit",
-    "bereit",
-    "online",
-    "jarvis",
-)
-
-WEEKDAY_HINTS = (
-    "montag",
-    "dienstag",
-    "mittwoch",
-    "donnerstag",
-    "freitag",
-    "samstag",
-    "sonntag",
-)
-
-CALENDAR_HINTS = (
-    "kalender",
-    "termin",
-    "event",
-    "eintrag",
-)
-
-GERMAN_WEEKDAY_BY_INDEX = {
-    0: "Montag",
-    1: "Dienstag",
-    2: "Mittwoch",
-    3: "Donnerstag",
-    4: "Freitag",
-    5: "Samstag",
-    6: "Sonntag",
-}
-
-
-def _looks_like_tool_request(user_message: str) -> bool:
-    lowered = user_message.strip().lower()
-    if not lowered:
-        return False
-    return any(hint in lowered for hint in TOOL_REQUEST_HINTS)
-
-
-def _normalize_honorifics(text: str) -> str:
-    normalized = text.strip()
-    if not normalized:
-        return normalized
-
-    normalized = re.sub(r"\bmein(?:e|er)?\s+herr(?:n)?\b", "Sir", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\bmein(?:e|er)?\s+gebiete?r\b", "Sir", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized
-
-
-def _quick_local_reply(user_message: str) -> str | None:
-    normalized = re.sub(r"\s+", " ", user_message.strip())
-    lowered = normalized.lower()
-    if not lowered:
-        return None
-
-    if len(lowered) > 90:
-        return None
-
-    if _looks_like_tool_request(lowered):
-        return None
-
-    if re.fullmatch(r"(danke(?: dir)?(?: schoen| schön)?(?: jarvis| sir)?|vielen dank(?:.*)?)", lowered):
-        return "Gern, Sir. Soll ich direkt den naechsten Schritt fuer Sie uebernehmen?"
-
-    if re.fullmatch(r"(hallo(?: jarvis)?|hi(?: jarvis)?|hey(?: jarvis)?|guten (?:morgen|tag|abend)(?: jarvis)?)", lowered):
-        return "Natuerlich, Sir. Womit kann ich helfen?"
-
-    if re.fullmatch(r"(ok(?:ay)?|passt|perfekt|super|alles klar)", lowered):
-        return "Verstanden, Sir."
-
-    if re.search(r"\b(help|hilfe|was kannst du|capabilities|funktionen)\b", lowered):
-        return (
-            "Ich kann lokal Chat, Notizen, Erinnerungen, Kalender, Kontakte, Mail-Entwuerfe, Nachrichten, Musiksteuerung, "
-            "App/URL-Start, Zwischenablage sowie sichere Dateiaktionen mit Freigaben ausfuehren. "
-            "Nennen Sie Aufgabe plus Zeit/Ziel, dann uebernehme ich den Rest."
-        )
-
-    return None
-
-
-def _quick_system_status_reply(user_message: str, settings: dict[str, Any]) -> str | None:
-    normalized = re.sub(r"\s+", " ", user_message.strip())
-    lowered = normalized.lower()
-    if not lowered:
-        return None
-
-    if len(lowered) > 140:
-        return None
-
-    status_hints = (
-        "status",
-        "modell",
-        "model",
-        "whisper",
-        "stt",
-        "tts",
-        "engine",
-        "welches modell",
-    )
-    if not any(hint in lowered for hint in status_hints):
-        return None
-
-    model = str(settings.get("model_name", "-")).strip() or "-"
-    whisper_model = Path(str(settings.get("whisper_model_path", "")).strip()).name or "auto"
-    tts_engine = str(settings.get("tts_engine", "piper")).strip() or "piper"
-    tts_voice = str(settings.get("tts_voice", "")).strip() or "-"
-
-    return (
-        f"Systemstatus: Modell {model}, STT {whisper_model}, "
-        f"TTS {tts_engine} ({tts_voice}), alles lokal."
-    )
-
-
-def _quick_utility_reply(user_message: str) -> str | None:
-    normalized = re.sub(r"\s+", " ", user_message.strip())
-    lowered = normalized.lower()
-    if not lowered:
-        return None
-
-    if len(lowered) > 120:
-        return None
-
-    if any(hint in lowered for hint in TIME_HINTS):
-        now = datetime.now()
-        return f"Aktuelle lokale Zeit: {now.strftime('%H:%M')} Uhr."
-
-    if any(hint in lowered for hint in DATE_HINTS) or re.fullmatch(r"(heute\??|welches datum\??)", lowered):
-        now = datetime.now()
-        weekday = GERMAN_WEEKDAY_BY_INDEX.get(now.weekday(), now.strftime("%A"))
-        return f"Heute ist {weekday}, der {now.strftime('%d.%m.%Y')}."
-
-    if re.fullmatch(r"(jarvis\??|bist du da\??|online\??|bereit\??)", lowered) or any(
-        hint in lowered for hint in READINESS_HINTS
-    ):
-        if len(lowered.split()) <= 4:
-            return "Ja, Sir. Systeme laufen stabil und ich bin einsatzbereit."
-
-    return None
-
-
-def _quick_clarification_reply(user_message: str) -> str | None:
-    normalized = re.sub(r"\s+", " ", user_message.strip())
-    lowered = normalized.lower()
-    if not lowered:
-        return None
-
-    if len(lowered) > 180:
-        return None
-
-    has_time_hint = (
-        re.search(r"\b\d{1,2}(?::|\.)?\d{0,2}\s*uhr\b", lowered) is not None
-        or re.search(r"\b\d{1,2}\.\d{1,2}(?:\.\d{2,4})?\b", lowered) is not None
-        or any(word in lowered for word in ("heute", "morgen", "uebermorgen", "übermorgen", *WEEKDAY_HINTS))
-    )
-    has_quote_content = re.search(r"\"[^\"]+\"|'[^']+'", normalized) is not None
-    has_content_hint = has_quote_content or any(
-        hint in lowered
-        for hint in (
-            "dass",
-            "lautet",
-            "sagt",
-            "heisst",
-            "heißt",
-            "inhalt",
-            "text",
-            "an ",
-            "ans ",
-            "daran",
-        )
-    )
-
-    if any(word in lowered for word in ("erinnerung", "erinner mich", "remind me")):
-        if not has_time_hint and not has_content_hint:
-            return (
-                "Damit ich die Erinnerung sauber anlege, brauche ich Zeitpunkt und Inhalt. "
-                "Beispiel: `Jarvis, erinnere mich morgen um 10 Uhr daran, Licht auszumachen.`"
-            )
-        if not has_time_hint:
-            return "Für die Erinnerung fehlt noch der Zeitpunkt. Wann genau soll ich sie setzen, Sir?"
-        if not has_content_hint and len(lowered.split()) <= 12:
-            return "Für die Erinnerung fehlt noch der genaue Inhalt. Was soll der Reminder sagen, Sir?"
-
-    if any(hint in lowered for hint in CALENDAR_HINTS):
-        has_calendar_verb = any(word in lowered for word in ("plane", "plan", "eintragen", "trag", "schedule"))
-        if has_calendar_verb and not has_time_hint:
-            return "Ich kann den Termin sofort eintragen. Nennen Sie bitte Startzeit und optional Dauer."
-
-    return None
-
-
 class AgentService:
     def __init__(
         self,
@@ -278,6 +50,8 @@ class AgentService:
         self.event_bus = event_bus
         self.tools = tools
         self.profile_path = profile_path
+        self.learning = LearningEngine(db, tools)
+
         self.pending_confirmations: dict[str, dict[str, str]] = {}
         self.history_limit = max(3, int(os.environ.get("JARVIS_HISTORY_LIMIT", "6")))
         self.memory_limit = max(1, int(os.environ.get("JARVIS_MEMORY_LIMIT", "1")))
@@ -350,6 +124,7 @@ class AgentService:
     ) -> list[dict[str, str]]:
         history = await self.db.list_recent_messages(session_id, limit=self.history_limit)
         memories = await load_context_snippets(self.db, user_message, limit=self.memory_limit)
+        learned_tool_stats = await self.db.get_tool_learning_stats()
 
         system_parts = [
             build_persona_system_prompt(profile),
@@ -363,6 +138,25 @@ class AgentService:
             system_parts.append("Kontext-Erinnerungen:")
             for memory in memories:
                 system_parts.append(f"- {memory}")
+
+        if learned_tool_stats:
+            ranked_stats = sorted(
+                learned_tool_stats,
+                key=tool_performance_score,
+                reverse=True,
+            )
+            system_parts.append(
+                "Lernsignale aus lokalen Ausfuehrungen (bevorzuge robuste und schnelle Wege):"
+            )
+            for row in ranked_stats[:5]:
+                success_count = int(row.get("success_count", 0))
+                failure_count = int(row.get("failure_count", 0))
+                total = max(1, success_count + failure_count)
+                success_rate = int(round((success_count / total) * 100))
+                latency = int(round(float(row.get("average_latency_ms", 0.0) or 0.0)))
+                system_parts.append(
+                    f"- {row.get('tool_name', '-')}: {success_rate}% Erfolg, {latency} ms Durchschnitt"
+                )
 
         messages: list[dict[str, str]] = [
             {
@@ -382,26 +176,34 @@ class AgentService:
 
     async def _decide_tool_intent(
         self,
-        *,
         user_message: str,
         settings: dict[str, Any],
+        allow_learned_commands: bool = True,
     ) -> ToolCallIntent | None:
+        if allow_learned_commands:
+            learned_intent = await self.learning.resolve_learned_command_intent(user_message)
+            if learned_intent:
+                return await self.learning.apply_adaptive_routing(learned_intent)
+
         heuristic_intent = infer_heuristic_tool_call(user_message)
         if heuristic_intent and self.tools.has_tool(heuristic_intent.tool_name):
-            return heuristic_intent
+            return await self.learning.apply_adaptive_routing(heuristic_intent)
+        if heuristic_intent and not self.tools.has_tool(heuristic_intent.tool_name):
+            heuristic_intent = None
 
         if not self.enable_tool_planner:
             return heuristic_intent
 
-        if not _looks_like_tool_request(user_message):
+        if not looks_like_tool_request(user_message):
             return heuristic_intent
 
+        ranked_tool_specs = await self.learning.rank_tool_specs_for_planner(self.tools.list_specs())
         try:
             planned = await plan_tool_call(
                 base_url=str(settings.get("ollama_base_url", "http://127.0.0.1:11434")),
                 model=str(settings.get("model_name", "qwen2.5:3b-instruct")),
                 user_message=user_message,
-                tool_specs=self.tools.list_specs(),
+                tool_specs=ranked_tool_specs,
             )
         except Exception:
             return heuristic_intent
@@ -419,11 +221,12 @@ class AgentService:
         if not self.tools.has_tool(tool_name):
             return heuristic_intent
 
-        return ToolCallIntent(
+        intent = ToolCallIntent(
             tool_name=tool_name,
             tool_input=tool_input,
             reason=reason,
         )
+        return await self.learning.apply_adaptive_routing(intent)
 
     async def start_run(self, session_id: str, run_id: str, user_message: str) -> None:
         await self.db.add_message(session_id=session_id, role="user", content=user_message)
@@ -459,12 +262,11 @@ class AgentService:
                     detail="Sicherheitsbestaetigung akzeptiert",
                 )
             else:
-                # Bei neuer Nachricht ohne Bestaetigung wird die alte ausstehende Bestätigung verworfen.
                 self.pending_confirmations.pop(session_id, None)
 
         blocked_reason = detect_blocked_user_request(normalized_user_message, profile)
         if blocked_reason:
-            blocked_text = _normalize_honorifics(refusal_message(profile, reason=blocked_reason))
+            blocked_text = normalize_honorifics(refusal_message(profile, reason=blocked_reason))
             await self.db.add_message(session_id=session_id, role="assistant", content=blocked_text)
             await self._emit_message(session_id, run_id, blocked_text)
             await self._emit_state(
@@ -482,7 +284,7 @@ class AgentService:
                     "original_message": normalized_user_message,
                     "reason": confirm_reason,
                 }
-                ask_text = _normalize_honorifics(confirmation_message(profile, reason=confirm_reason))
+                ask_text = normalize_honorifics(confirmation_message(profile, reason=confirm_reason))
                 await self.db.add_message(session_id=session_id, role="assistant", content=ask_text)
                 await self._emit_message(session_id, run_id, ask_text)
                 await self._emit_state(
@@ -493,9 +295,26 @@ class AgentService:
                 )
                 return
 
-        quick_reply = _quick_local_reply(normalized_user_message)
+        learning_response = await self.learning.handle_learning_instruction(
+            user_message=normalized_user_message,
+            settings=settings,
+            decide_tool_intent=self._decide_tool_intent,
+        )
+        if learning_response:
+            learning_text = normalize_honorifics(learning_response)
+            await self.db.add_message(session_id=session_id, role="assistant", content=learning_text)
+            await self._emit_message(session_id, run_id, learning_text)
+            await self._emit_state(
+                session_id=session_id,
+                run_id=run_id,
+                state="done",
+                detail="Lernmodus aktualisiert",
+            )
+            return
+
+        quick_reply = quick_local_reply(normalized_user_message)
         if quick_reply:
-            quick_text = _normalize_honorifics(quick_reply)
+            quick_text = normalize_honorifics(quick_reply)
             await self.db.add_message(session_id=session_id, role="assistant", content=quick_text)
             await self._emit_message(session_id, run_id, quick_text)
             await self._emit_state(
@@ -506,9 +325,9 @@ class AgentService:
             )
             return
 
-        quick_status = _quick_system_status_reply(normalized_user_message, settings)
+        quick_status = quick_system_status_reply(normalized_user_message, settings)
         if quick_status:
-            quick_text = _normalize_honorifics(quick_status)
+            quick_text = normalize_honorifics(quick_status)
             await self.db.add_message(session_id=session_id, role="assistant", content=quick_text)
             await self._emit_message(session_id, run_id, quick_text)
             await self._emit_state(
@@ -519,9 +338,9 @@ class AgentService:
             )
             return
 
-        quick_utility = _quick_utility_reply(normalized_user_message)
+        quick_utility = quick_utility_reply(normalized_user_message)
         if quick_utility:
-            quick_text = _normalize_honorifics(quick_utility)
+            quick_text = normalize_honorifics(quick_utility)
             await self.db.add_message(session_id=session_id, role="assistant", content=quick_text)
             await self._emit_message(session_id, run_id, quick_text)
             await self._emit_state(
@@ -532,9 +351,9 @@ class AgentService:
             )
             return
 
-        clarification = _quick_clarification_reply(normalized_user_message)
+        clarification = quick_clarification_reply(normalized_user_message)
         if clarification:
-            clarification_text = _normalize_honorifics(clarification)
+            clarification_text = normalize_honorifics(clarification)
             await self.db.add_message(session_id=session_id, role="assistant", content=clarification_text)
             await self._emit_message(session_id, run_id, clarification_text)
             await self._emit_state(
@@ -545,12 +364,10 @@ class AgentService:
             )
             return
 
-        intent = await self._decide_tool_intent(
-            user_message=normalized_user_message,
-            settings=settings,
-        )
+        intent = await self._decide_tool_intent(normalized_user_message, settings)
 
         if intent and self.tools.has_tool(intent.tool_name):
+            self.learning.mark_pending_trigger(run_id, intent.source_trigger)
             approval_id = str(uuid.uuid4())
             approval = await self.db.create_approval(
                 approval_id=approval_id,
@@ -568,6 +385,21 @@ class AgentService:
                     "approval": approval,
                     "reason": intent.reason,
                 },
+            )
+            return
+
+        if intent is None and looks_like_tool_request(normalized_user_message):
+            clarification_text = normalize_honorifics(
+                "Ich habe den Tool-Aufruf nicht eindeutig erkannt und fuehre daher nichts blind aus. "
+                "Formulieren Sie bitte konkret, z. B. `Oeffne Safari` oder `Oeffne die App Notizen`."
+            )
+            await self.db.add_message(session_id=session_id, role="assistant", content=clarification_text)
+            await self._emit_message(session_id, run_id, clarification_text)
+            await self._emit_state(
+                session_id=session_id,
+                run_id=run_id,
+                state="done",
+                detail="Tool-Aufruf unklar, keine Ausfuehrung",
             )
             return
 
@@ -604,7 +436,7 @@ class AgentService:
 
             await flush_token_buffer(force=True)
 
-            assistant_text = _normalize_honorifics(assistant_text)
+            assistant_text = normalize_honorifics(assistant_text)
             if not assistant_text:
                 assistant_text = "Ich konnte lokal keine Antwort erzeugen. Bitte pruefe Ollama und das Modell."
 
@@ -622,7 +454,7 @@ class AgentService:
             )
             await maybe_compact_session(self.db, session_id)
         except LlmError as error:
-            fallback = _normalize_honorifics(f"LLM Fehler: {error}")
+            fallback = normalize_honorifics(f"LLM Fehler: {error}")
             await self.db.add_message(session_id=session_id, role="assistant", content=fallback)
             await self._emit_message(session_id, run_id, fallback)
             await self._emit_state(
@@ -632,7 +464,7 @@ class AgentService:
                 detail="LLM Anfrage fehlgeschlagen",
             )
         except Exception as error:
-            fallback = _normalize_honorifics(f"Unerwarteter Fehler: {error}")
+            fallback = normalize_honorifics(f"Unerwarteter Fehler: {error}")
             await self.db.add_message(session_id=session_id, role="assistant", content=fallback)
             await self._emit_message(session_id, run_id, fallback)
             await self._emit_state(
@@ -674,7 +506,7 @@ class AgentService:
         ]
 
         if not self.enable_llm_tool_summary:
-            return _normalize_honorifics(f"Aktion abgeschlossen ({tool_name}). Ergebnis: {tool_output}")
+            return normalize_honorifics(f"Aktion abgeschlossen ({tool_name}). Ergebnis: {tool_output}")
 
         try:
             response = await complete_chat(
@@ -685,11 +517,11 @@ class AgentService:
                 timeout_seconds=20.0,
             )
             if response.strip():
-                return _normalize_honorifics(response)
+                return normalize_honorifics(response)
         except Exception:
             pass
 
-        return _normalize_honorifics(f"Tool `{tool_name}` ausgefuehrt. Ergebnis: {tool_output}")
+        return normalize_honorifics(f"Tool `{tool_name}` ausgefuehrt. Ergebnis: {tool_output}")
 
     async def handle_approval_decision(self, approval_id: str, decision: str) -> str:
         approval = await self.db.get_approval(approval_id)
@@ -703,6 +535,7 @@ class AgentService:
         run_id = str(approval["run_id"])
         tool_name = str(approval["tool_name"])
         tool_input = dict(approval["tool_input"])
+        learned_trigger = self.learning.pop_pending_trigger(run_id)
 
         if decision == "deny":
             await self.db.resolve_approval(
@@ -710,7 +543,7 @@ class AgentService:
                 status="denied",
                 decision="deny",
             )
-            denied_text = _normalize_honorifics(f"Aktion abgelehnt: {tool_name}. Es wurde nichts ausgefuehrt.")
+            denied_text = normalize_honorifics(f"Aktion abgelehnt: {tool_name}. Es wurde nichts ausgefuehrt.")
             await self.db.add_message(session_id=session_id, role="assistant", content=denied_text)
             await self._emit_message(session_id, run_id, denied_text)
             await self._emit_state(
@@ -740,12 +573,14 @@ class AgentService:
         settings = await self.db.get_settings()
         profile = self._load_profile()
 
+        tool_started_at = time.perf_counter()
         tool_result = await self.tools.execute(
             tool_name=tool_name,
             tool_input=tool_input,
             settings=settings,
             profile=profile,
         )
+        tool_latency_ms = int(round((time.perf_counter() - tool_started_at) * 1000))
 
         await self.db.add_tool_run(
             run_id=run_id,
@@ -757,6 +592,16 @@ class AgentService:
             result=tool_result.output,
             error=tool_result.error,
         )
+        await self.db.record_tool_learning(
+            tool_name=tool_name,
+            success=tool_result.success,
+            latency_ms=tool_latency_ms,
+        )
+        if learned_trigger:
+            await self.db.record_learned_command_result(
+                trigger=learned_trigger,
+                success=tool_result.success,
+            )
 
         if tool_result.success:
             assistant_text = await self._compose_tool_response(
@@ -772,10 +617,10 @@ class AgentService:
                 session_id=session_id,
                 run_id=run_id,
                 state="done",
-                detail=f"Tool erfolgreich: {tool_name}",
+                detail=f"Tool erfolgreich: {tool_name} ({tool_latency_ms} ms)",
             )
         else:
-            error_text = _normalize_honorifics(
+            error_text = normalize_honorifics(
                 f"Tool fehlgeschlagen ({tool_name}): {tool_result.error or 'Unbekannter Fehler'}"
             )
             await self.db.add_message(session_id=session_id, role="assistant", content=error_text)
@@ -784,7 +629,7 @@ class AgentService:
                 session_id=session_id,
                 run_id=run_id,
                 state="error",
-                detail=f"Tool Fehler: {tool_name}",
+                detail=f"Tool Fehler: {tool_name} ({tool_latency_ms} ms)",
             )
 
         await maybe_compact_session(self.db, session_id)

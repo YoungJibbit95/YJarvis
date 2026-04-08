@@ -58,6 +58,22 @@ def test_heuristic_detects_open_app_without_app_keyword():
     assert intent.tool_input["app_name"] == "Safari"
 
 
+def test_heuristic_detects_open_app_with_infinitive_form():
+    intent = infer_heuristic_tool_call("kannst du bitte Safari öffnen")
+
+    assert intent is not None
+    assert intent.tool_name == "open_app"
+    assert intent.tool_input["app_name"] == "Safari"
+
+
+def test_heuristic_normalizes_notiz_app_to_notes():
+    intent = infer_heuristic_tool_call("oeffne die notiz app")
+
+    assert intent is not None
+    assert intent.tool_name == "open_app"
+    assert intent.tool_input["app_name"] == "Notes"
+
+
 def test_heuristic_clipboard_write_extracts_payload_text():
     intent = infer_heuristic_tool_call("kopiere Hallo Sir in die Zwischenablage")
 
@@ -156,3 +172,21 @@ def test_heuristic_calendar_list_detected():
 
     assert intent is not None
     assert intent.tool_name == "calendar_list_events"
+
+
+def test_heuristic_raycast_open_detected():
+    intent = infer_heuristic_tool_call("oeffne raycast mit suche projekt status")
+
+    assert intent is not None
+    assert intent.tool_name == "raycast_open"
+    assert "projekt status" in intent.tool_input["fallback_text"].lower()
+
+
+def test_heuristic_raycast_command_detected():
+    intent = infer_heuristic_tool_call("raycast befehl raycast/file-search/search-files mit text ~/Desktop")
+
+    assert intent is not None
+    assert intent.tool_name == "raycast_run_command"
+    assert intent.tool_input["owner"] == "raycast"
+    assert intent.tool_input["extension"] == "file-search"
+    assert intent.tool_input["command"] == "search-files"

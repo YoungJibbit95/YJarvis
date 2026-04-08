@@ -10,6 +10,7 @@ A fully local desktop assistant for macOS (Apple Silicon). No cloud calls.
 - Ollama for local LLM runtime
 - whisper.cpp for speech-to-text (STT)
 - Piper for text-to-speech (TTS)
+- Raycast Deeplink integration (optional, local)
 
 ## Requirements (macOS)
 
@@ -76,6 +77,20 @@ npm run dev:agent:reload
 - Wake-word only input (for example just `Jarvis`) is ignored.
 - `Text only` disables automatic spoken replies.
 - Echo suppression is active to avoid re-capturing speaker output.
+
+## Learning Mode
+
+Jarvis can learn custom triggers and optimize tool decisions from local success/latency stats.
+
+- Teach: `/learn "abendroutine" => oeffne raycast`
+- List learned triggers: `/learn-list`
+- Remove learned trigger: `/unlearn "abendroutine"`
+
+Notes:
+
+- Learned commands are stored locally in SQLite.
+- Every learned action still requires explicit approval before execution.
+- Tool routing is adapted over time based on local execution reliability and speed.
 
 ## Safety Model
 

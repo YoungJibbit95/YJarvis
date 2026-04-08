@@ -1,4 +1,5 @@
 import {
+  CSSProperties,
   FormEvent,
   memo,
   useCallback,
@@ -116,6 +117,7 @@ const QUICK_ACTIONS: Array<{ label: string; prompt: string }> = [
     prompt: "Jarvis, plane morgen um 10 Uhr einen Termin mit dem Titel Projekt-Review fuer 30 Minuten."
   }
 ];
+const ORB_PARTICLE_KEYS = Array.from({ length: 14 }, (_, index) => index);
 
 function formatJson(value: Record<string, unknown>) {
   return JSON.stringify(value, null, 2);
@@ -1535,12 +1537,33 @@ function App() {
 
           <div className="conversation-viewport">
             <div className={`conversation-orb ${assistantMode}`} aria-hidden="true">
+              <div className="conversation-orb-aurora" />
+              <div className="conversation-orb-grid" />
               <div className="conversation-orb-rings">
                 <span />
                 <span />
                 <span />
+                <span />
               </div>
-              <div className="conversation-orb-core" />
+              <div className="conversation-orb-core-shell">
+                <div className="conversation-orb-core" />
+                <div className="conversation-orb-core-glint" />
+              </div>
+              <div className="conversation-orb-wave">
+                <span />
+                <span />
+                <span />
+                <span />
+                <span />
+              </div>
+              <div className="conversation-orb-particles">
+                {ORB_PARTICLE_KEYS.map((particleIndex) => (
+                  <span
+                    key={particleIndex}
+                    style={{ "--particle-index": particleIndex } as CSSProperties}
+                  />
+                ))}
+              </div>
               <small>{assistantModeLabel}</small>
             </div>
 

@@ -6,12 +6,15 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import Any
 
+from .app_aliases import normalize_app_name
+
 
 @dataclass
 class ToolCallIntent:
     tool_name: str
     tool_input: dict[str, Any]
     reason: str
+    source_trigger: str | None = None
 
 
 URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
@@ -65,6 +68,7 @@ CONTACT_HINT_WORDS = ("kontakt", "kontakte", "contact", "contacts")
 MAIL_HINT_WORDS = ("mail", "email", "e-mail")
 MESSAGE_HINT_WORDS = ("nachricht", "imessage", "sms", "message")
 MUSIC_HINT_WORDS = ("musik", "music")
+RAYCAST_HINT_WORDS = ("raycast",)
 
 
 def _extract_quoted(text: str) -> str | None:
@@ -134,7 +138,12 @@ def _normalize_due_phrase(raw: str) -> str:
 
 def _infer_open_app_name(message: str) -> str | None:
     patterns = (
-        r"(?i)\b(?:oeffne|öffne|starte|start|launch)\s+(?:die\s+|den\s+|das\s+)?(?:app\s+)?(.+)$",
+        r"(?i)\b(?:oeffne|öffne|oeffnen|öffnen|open|starte|start|starten|launch)\s+"
+        r"(?:mal\s+|bitte\s+)?(?:die\s+|den\s+|das\s+)?(?:app\s+)?(.+)$",
+        r"(?i)\b(?:kannst du(?: bitte)?|koenntest du(?: bitte)?|könntest du(?: bitte)?|"
+        r"wuerdest du(?: bitte)?|würdest du(?: bitte)?|bitte)\s+"
+        r"(?:die\s+|den\s+|das\s+)?(?:app\s+)?(.+?)\s+"
+        r"(?:oeffnen|öffnen|open|starten|start)\b",
         r"(?i)\b(?:mach)\s+(?:die\s+|den\s+|das\s+)?(.+?)\s+auf\b",
     )
 
@@ -143,7 +152,13 @@ def _infer_open_app_name(message: str) -> str | None:
         if not match:
             continue
         candidate = _trim_trailing_polite_words(_collapse_whitespace(match.group(1)))
-        candidate = re.sub(r"(?i)^(?:app\s+)", "", candidate).strip()
+        candidate = re.sub(
+            r"(?i)^(?:kannst du(?: bitte)?|koenntest du(?: bitte)?|könntest du(?: bitte)?|"
+            r"wuerdest du(?: bitte)?|würdest du(?: bitte)?|bitte|mal)\s+",
+            "",
+            candidate,
+        ).strip()
+        candidate = normalize_app_name(candidate)
         if not candidate:
             continue
         lowered = candidate.lower()
@@ -325,6 +340,55 @@ def _infer_music_control_input(message: str) -> dict[str, Any] | None:
     if any(word in lowered for word in ("vorher", "zurueck", "zurück", "previous")):
         return {"action": "previous"}
     return None
+
+
+def _infer_raycast_open_input(message: str) -> dict[str, Any]:
+    search_match = re.search(
+        r"(?is)\braycast\b.*?\b(?:mit|nach|fuer|für)\s+(?:suche|search|text)\s+(.+)$",
+        message,
+    )
+    if not search_match:
+        search_match = re.search(
+            r"(?is)\b(?:oeffne|öffne|starte|start)\s+raycast\s+(.+)$",
+            message,
+        )
+
+    fallback_text = ""
+    if search_match:
+        fallback_text = _trim_trailing_polite_words(_collapse_whitespace(search_match.group(1)))
+        fallback_text = re.sub(r"(?i)^(?:bitte|mal|jetzt)\s+", "", fallback_text).strip()
+
+    if fallback_text and fallback_text.lower() in {"raycast", "die app raycast"}:
+        fallback_text = ""
+
+    return {"fallback_text": fallback_text}
+
+
+def _infer_raycast_run_command_input(message: str) -> dict[str, Any] | None:
+    command_match = re.search(
+        r"(?is)\braycast\b.*?\b(?:befehl|command|kommando)\b\s+"
+        r"([a-z0-9._-]+)/([a-z0-9._-]+)/([a-z0-9._-]+)"
+        r"(?:\s+(?:mit|fuer|für)\s+(?:text|fallback|suche)\s+(.+))?$",
+        message,
+        re.IGNORECASE,
+    )
+    if not command_match:
+        return None
+
+    owner = command_match.group(1).strip()
+    extension = command_match.group(2).strip()
+    command = command_match.group(3).strip()
+    fallback_text = _trim_trailing_polite_words(_collapse_whitespace(command_match.group(4) or ""))
+
+    payload: dict[str, Any] = {
+        "owner": owner,
+        "extension": extension,
+        "command": command,
+        "background": True,
+    }
+    if fallback_text:
+        payload["fallback_text"] = fallback_text
+    return payload
 
 
 def _extract_due_components(text: str) -> tuple[str | None, str | None, list[tuple[int, int]]]:
@@ -701,6 +765,22 @@ def infer_heuristic_tool_call(user_message: str) -> ToolCallIntent | None:
                 tool_name="music_control",
                 tool_input=music_payload,
                 reason="Musiksteuerung erkannt",
+            )
+
+    if any(word in lowered for word in RAYCAST_HINT_WORDS):
+        run_payload = _infer_raycast_run_command_input(message)
+        if run_payload:
+            return ToolCallIntent(
+                tool_name="raycast_run_command",
+                tool_input=run_payload,
+                reason="Raycast Deeplink Command erkannt",
+            )
+
+        if re.search(r"(?i)\b(?:oeffne|öffne|starte|start|launch)\b", lowered):
+            return ToolCallIntent(
+                tool_name="raycast_open",
+                tool_input=_infer_raycast_open_input(message),
+                reason="Raycast Start erkannt",
             )
 
     url_match = URL_RE.search(message)
