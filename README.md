@@ -1,6 +1,9 @@
 # YJarvis Local v1
 
 ![Repository Views](https://komarev.com/ghpvc/?username=YoungJibbit95&repo=YJarvis&label=Repository%20Views&color=0e75b6&style=flat)
+[![GitHub Stars](https://img.shields.io/github/stars/YoungJibbit95/YJarvis?style=flat)](https://github.com/YoungJibbit95/YJarvis/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/YoungJibbit95/YJarvis?style=flat)](https://github.com/YoungJibbit95/YJarvis/network/members)
+[![Last Commit](https://img.shields.io/github/last-commit/YoungJibbit95/YJarvis?style=flat)](https://github.com/YoungJibbit95/YJarvis/commits/main)
 
 A fully local desktop assistant for macOS (Apple Silicon). No cloud calls.
 
