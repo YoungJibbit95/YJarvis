@@ -1,0 +1,388 @@
+:root {
+  color-scheme: dark;
+  --bg: #0f1116;
+  --panel: #161a24;
+  --muted: #8d97ae;
+  --text: #ecf0ff;
+  --accent: #31b5a8;
+  --accent-strong: #42d9c9;
+  --danger: #c45f61;
+  --border: #252c3d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #1b263d 0%, transparent 70%),
+    radial-gradient(900px 520px at 90% -20%, #2b2245 0%, transparent 65%),
+    var(--bg);
+  color: var(--text);
+}
+
+main {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.app-header h1 {
+  font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+  font-size: 30px;
+  letter-spacing: 0.03em;
+}
+
+.app-header p {
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.env-pill {
+  background: #151c2d;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 14px;
+  color: #b9c2d9;
+  font-size: 12px;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+button {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #1b2335;
+  color: var(--text);
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+button:hover {
+  border-color: #304063;
+}
+
+button.active {
+  background: linear-gradient(135deg, #243f68, #1d786f);
+  border-color: transparent;
+}
+
+button.secondary {
+  background: transparent;
+}
+
+button.tiny {
+  padding: 4px 8px;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.panel {
+  background: linear-gradient(180deg, #171c2a, #121724);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.panel-header p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chat-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 14px;
+}
+
+.messages {
+  border: 1px solid var(--border);
+  background: #101521;
+  border-radius: 12px;
+  padding: 10px;
+  height: 520px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.message {
+  border: 1px solid #2a3245;
+  border-radius: 10px;
+  padding: 10px;
+  max-width: 88%;
+}
+
+.message header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  color: #b8c2dc;
+  font-size: 12px;
+}
+
+.message p {
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+.message.user {
+  align-self: flex-end;
+  border-color: #2b5d58;
+  background: rgba(49, 181, 168, 0.13);
+}
+
+.message.assistant {
+  align-self: flex-start;
+  background: #151c2c;
+}
+
+.message.draft {
+  border-style: dashed;
+}
+
+.composer {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+textarea,
+input,
+select,
+pre {
+  font-family: "IBM Plex Mono", "Menlo", monospace;
+}
+
+textarea,
+input,
+select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0f1522;
+  color: var(--text);
+  padding: 10px;
+}
+
+.tts-voice-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.tts-voice-row button {
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.actions .record {
+  min-width: 150px;
+}
+
+.actions .record.active {
+  background: linear-gradient(135deg, #61353d, #ba545f);
+  border-color: transparent;
+}
+
+.timeline ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  height: 620px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.timeline li {
+  border: 1px solid #2a3040;
+  border-radius: 10px;
+  padding: 10px;
+  background: #121827;
+}
+
+.timeline li div {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #aab6d1;
+}
+
+.timeline li p {
+  color: #d6ddf0;
+  font-size: 14px;
+}
+
+.timeline li time {
+  margin-top: 6px;
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.approval-card {
+  border: 1px solid #2f3346;
+  border-radius: 12px;
+  padding: 12px;
+  background: #111724;
+  margin-bottom: 10px;
+}
+
+.approval-card pre {
+  background: #0d111a;
+  border: 1px solid #2a3042;
+  border-radius: 10px;
+  padding: 10px;
+  overflow: auto;
+}
+
+.approval-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #b4bfd8;
+  font-size: 13px;
+}
+
+.allowlist {
+  margin-top: 14px;
+}
+
+.allowlist-add {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.allowlist ul {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.allowlist li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #2c3244;
+  background: #101624;
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.settings-footer {
+  margin-top: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.entity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.entity-card {
+  border: 1px solid #2d3145;
+  border-radius: 12px;
+  padding: 12px;
+  background: #131926;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.entity-card p {
+  color: #95a2be;
+}
+
+.entity-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.empty {
+  color: var(--muted);
+}
+
+@media (max-width: 1040px) {
+  main {
+    padding: 12px;
+  }
+
+  .chat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .timeline ul,
+  .messages {
+    height: 380px;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tts-voice-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

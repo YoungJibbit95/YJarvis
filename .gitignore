@@ -1,0 +1,16 @@
+node_modules
+.DS_Store
+.env
+.env.*
+!.env.example
+.venv
+runtime/*.db
+runtime/*.log
+runtime/audio/
+runtime/tts/
+runtime/models/
+apps/desktop/dist
+apps/desktop/.vite
+__pycache__
+*.pyc
+.pytest_cache
