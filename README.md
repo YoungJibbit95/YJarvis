@@ -1,17 +1,17 @@
-# Jarvis Local v1
+# YJarvis Local v1
 
-Lokaler Jarvis fuer macOS (M1/M2) ohne Cloud-Zugriffe.
+A fully local desktop assistant for macOS (Apple Silicon). No cloud calls.
 
 ## Stack
 
-- Python FastAPI Agent (`apps/agent`)
-- Electron + React UI (`apps/desktop`)
-- SQLite fuer Sessions, Memory, Settings (`runtime/jarvis.db`)
-- Ollama als lokaler LLM Runtime
-- Whisper.cpp fuer Speech-to-Text
-- Piper fuer Text-to-Speech
+- Python FastAPI agent (`apps/agent`)
+- Electron + React desktop UI (`apps/desktop`)
+- SQLite for sessions, memory, settings (`runtime/jarvis.db`)
+- Ollama for local LLM runtime
+- whisper.cpp for speech-to-text (STT)
+- Piper for text-to-speech (TTS)
 
-## Voraussetzungen (macOS)
+## Requirements (macOS)
 
 ```bash
 brew install python@3.11 ollama ffmpeg whisper-cpp portaudio
@@ -26,93 +26,76 @@ pip install -U pip
 pip install -r apps/agent/requirements.txt
 ```
 
-## LLM Setup
+## Local Model Setup
+
+### 1) LLM (Ollama)
 
 ```bash
 ollama serve
 ollama pull qwen2.5:3b-instruct
 ```
 
-## Whisper Modell
-
-Empfohlen fuer bessere Erkennung: `ggml-small.bin` (lokal, whisper.cpp).
+### 2) Whisper model (recommended: `ggml-small.bin`)
 
 ```bash
 ./scripts/download-whisper-model.sh ggml-small.bin
 ```
 
-Optional (schneller, aber ungenauer): `ggml-base.bin`.
+Optional (faster, less accurate): `ggml-base.bin`.
 
-## Piper Modell
+### 3) Piper voice model
 
-Setze in der UI unter `Settings -> Piper Modellpfad` den absoluten Pfad zu deinem lokalen Piper Modell.
+Set the absolute model path in UI: `Settings -> Piper model path`.
 
-## Start
+## Run
 
 ```bash
 npm install
 npm run dev
 ```
 
-`npm run dev` startet Ollama + Agent + Desktop zusammen (Root-Orchestrierung).
-Wenn du nur den Agent starten willst:
+`npm run dev` starts Ollama + Agent + Desktop together.
+
+Agent only:
 
 ```bash
 npm run dev:agent
 ```
 
-Optional mit Hot-Reload:
+Agent with hot reload:
 
 ```bash
 npm run dev:agent:reload
 ```
 
-## Sprachmodus
+## Voice Mode
 
-- `Sprachmodus starten`: einmal klicken, dann bleibt Mikrofon aktiv.
-- Jarvis transkribiert lokal und sendet erkannte Sprache automatisch nach kurzer Sprechpause.
-- Voice-Gating aktiv: Sprachkommandos werden nur gesendet, wenn der Satz mit `Jarvis` beginnt (`Jarvis ...`).
-- Standard: Jarvis antwortet per Sprachausgabe ueber `piper` (komplett lokal).
-- Im Settings-Tab werden verfuegbare `say`-Stimmen automatisch geladen, falls du optional auf `tts_engine=say` umstellst.
-- Mit `Text only` wird Auto-Sprachausgabe deaktiviert (manuelles `Vorlesen` bleibt moeglich).
-- STT setzt einen Jarvis-Kontextprompt und korrigiert haeufige Wakeword-Fehler (`jobs` -> `Jarvis`) in typischen Anrede-Saetzen.
-- STT hat zusaetzliche Halluzinationsfilter fuer kurze Artefakt-Ausgaben (z. B. `swr 2020`) und verwirft diese.
-- STT normalisiert haeufige bairische Kurzformen (`i`, `ned/net`, `koa/koan`, `des`) fuer robustere Kommandos.
-- Kurze Alltagsphrasen wie `danke`/`hallo` werden lokal als Schnellantwort behandelt (ohne extra LLM-Roundtrip).
-- WebSocket verbindet sich bei Unterbrechung automatisch neu (Backoff-Reconnect).
-- Echo-Schutz aktiv: waehrend TTS wird Voice-Input kurz unterdrueckt, damit Lautsprecher-Ausgabe nicht als neue Eingabe zurueckkommt.
-- Persona ist auf `Sir` als direkte Anrede ausgerichtet (statt `mein Herr`) und auf einen freundlicheren Ton.
-- Fuer die Audioausgabe wird `Sir` intern auf die konfigurierte Lautung gemappt (Default `Sör`), damit es nicht wie `sier` klingt.
-- Die TTS-Nachlauf-Sperre ist kurz gehalten, damit du direkt nach Jarvis wieder sprechen kannst.
-- Wakeword-only (`Jarvis`) wird nicht als Aufgabe gesendet; sprich den Auftrag direkt danach.
+- Click once to start voice mode, click again to stop.
+- Audio is transcribed locally and auto-sent after a short pause.
+- Voice command gating is enabled: commands are only sent if the sentence starts with `Jarvis ...`.
+- Wake-word only input (for example just `Jarvis`) is ignored.
+- `Text only` disables automatic spoken replies.
+- Echo suppression is active to avoid re-capturing speaker output.
 
-## Audio-Temp Cleanup
+## Safety Model
 
-- Upload-, STT- und TTS-Tempdateien werden nach Verarbeitung automatisch geloescht.
-- Zusaetzlich begrenzt ein Wartungsjob alte Artefakte in `runtime/audio` und `runtime/tts`.
-- Optional per Env anpassbar:
-  - `JARVIS_AUDIO_TMP_KEEP` (Default `30`)
-  - `JARVIS_TTS_TMP_KEEP` (Default `20`)
-  - `JARVIS_TMP_MAX_AGE_SECONDS` (Default `43200`, also 12h)
+- Every tool action requires explicit approval.
+- File writes are restricted to configured `allowed_paths`.
+- Hard block rules reject destructive/system-critical requests.
+- Sensitive requests require explicit confirmation before execution.
+- Tool runs and approvals are logged locally in SQLite.
 
-## Jarvis Persona + Sicherheitsprofil
+## Safety/Profile Script
 
-Profilskript ausfuehren (erstellt/ueberschreibt `runtime/jarvis_profile.json`):
+Run this to (re)generate `runtime/jarvis_profile.json`:
 
 ```bash
 ./scripts/apply_jarvis_profile.sh
 ```
 
-Das Profil wird pro Anfrage geladen und ist damit ab der naechsten Agent-Anfrage aktiv.
+The profile is loaded per request and becomes effective on the next request.
 
-Das Profil steuert:
-- Jarvis-Sprachstil (deutsch, praezise, technisch)
-- Blockliste fuer destruktive Requests (z. B. "loesch alle daten", "rm -rf /")
-- Harte Sperre fuer systemkritische Pfade (`/System`, `/usr`, `/etc`, ...)
-- Inhaltsfilter fuer gefaehrliche Befehlsmuster in Datei-Schreibaktionen
-- Pflicht-Bestaetigung fuer sicherheitsrelevante, aber nicht direkt destruktive Requests
-
-## API Uebersicht
+## API Overview
 
 - `POST /v1/sessions`
 - `POST /v1/chat`
@@ -128,44 +111,57 @@ Das Profil steuert:
 - `POST /v1/smarthome/call`
 - `WS /v1/ws/{session_id}`
 
-## Sicherheitsmodell
+## Audio Temp Cleanup
 
-- Tool-Ausfuehrung nur nach expliziter Freigabe.
-- Datei-Schreiboperationen nur in `allowed_paths`.
-- Zusaetzliche Hard-Block-Regeln gegen systemkritische/zerstoererische Requests.
-- Kritische, fragwuerdige Requests (z. B. sudo/keychain/launchctl) werden erst nach expliziter Chat-Bestaetigung weiterbearbeitet.
-- Komplette Tool-Runs + Approvals werden lokal in SQLite protokolliert.
+- Upload/STT/TTS temp files are deleted after processing.
+- A maintenance cleanup also limits old artifacts in `runtime/audio` and `runtime/tts`.
 
-## Tests
+Env tuning:
+
+- `JARVIS_AUDIO_TMP_KEEP` (default `30`)
+- `JARVIS_TTS_TMP_KEEP` (default `20`)
+- `JARVIS_TMP_MAX_AGE_SECONDS` (default `43200` = 12h)
+
+## Performance Tuning
+
+Recommended baseline:
+
+- `JARVIS_OLLAMA_KEEP_ALIVE=30m`
+- `JARVIS_ENABLE_TOOL_PLANNER=0`
+- Lower `JARVIS_HISTORY_LIMIT` and `JARVIS_MEMORY_LIMIT`
+
+Streaming responsiveness:
+
+- `JARVIS_TOKEN_FLUSH_INTERVAL_MS` (default `20`)
+- `JARVIS_TOKEN_FLUSH_MIN_CHARS` (default `8`)
+
+Whisper decoding:
+
+- `JARVIS_WHISPER_BEAM_SIZE`
+- `JARVIS_WHISPER_BEST_OF`
+- `JARVIS_WHISPER_NO_SPEECH_THOLD`
+- `JARVIS_WHISPER_ENTROPY_THOLD`
+- `JARVIS_WHISPER_LOGPROB_THOLD`
+
+Piper prosody:
+
+- `JARVIS_PIPER_LENGTH_SCALE`
+- `JARVIS_PIPER_NOISE_SCALE`
+- `JARVIS_PIPER_NOISE_W_SCALE`
+- `JARVIS_PIPER_SENTENCE_SILENCE`
+- `JARVIS_PIPER_VOLUME`
+- `JARVIS_PIPER_USE_PYTHON_API` (default `1`)
+
+## Testing
 
 ```bash
 source .venv/bin/activate
 pytest -q
 ```
 
-## Hinweise
+## Troubleshooting
 
-- Wenn `python3.11` nicht gefunden wird, setze `JARVIS_PYTHON_BIN` beim Start der Desktop-App.
-- Wenn TTS fehlschlaegt, pruefe `tts_engine`, `tts_model_path` und ob `piper` im PATH ist.
-- Piper wird standardmaessig bevorzugt ueber die Python-API mit Model-Cache genutzt (schnellerer Start bei Folgesaetzen); fallback auf CLI bleibt aktiv.
-- Wenn STT fehlschlaegt, pruefe `whisper_binary`, `whisper_model_path` und `ffmpeg`.
-- Fuer schnellere Antworten: `JARVIS_OLLAMA_KEEP_ALIVE=30m`, `JARVIS_ENABLE_TOOL_PLANNER=0`, kleinere `JARVIS_HISTORY_LIMIT`/`JARVIS_MEMORY_LIMIT`.
-- Fuer schnellere Streaming-Textausgabe kannst du Token-Batching tunen:
-  - `JARVIS_TOKEN_FLUSH_INTERVAL_MS` (Default `20`)
-  - `JARVIS_TOKEN_FLUSH_MIN_CHARS` (Default `8`)
-- Fuer weniger monotone Piper-Ausgabe kannst du die Prosody per Env feinjustieren:
-  - `JARVIS_PIPER_LENGTH_SCALE`
-  - `JARVIS_PIPER_NOISE_SCALE`
-  - `JARVIS_PIPER_NOISE_W_SCALE`
-  - `JARVIS_PIPER_SENTENCE_SILENCE`
-  - `JARVIS_PIPER_VOLUME`
-  - `JARVIS_PIPER_USE_PYTHON_API` (Default `1`, empfohlen fuer geringere Latenz)
-- Fuer STT-Qualitaet/Empfindlichkeit kannst du Whisper-Decoding justieren:
-  - `JARVIS_WHISPER_BEAM_SIZE`
-  - `JARVIS_WHISPER_BEST_OF`
-  - `JARVIS_WHISPER_NO_SPEECH_THOLD`
-  - `JARVIS_WHISPER_ENTROPY_THOLD`
-  - `JARVIS_WHISPER_LOGPROB_THOLD`
-- Alternative: `tts_engine=say` mit natuerlicheren lokalen Stimmen wie `Anna`, `Flo (Deutsch (Deutschland))`, `Eddy (Deutsch (Deutschland))`.
-- Bei `tts_engine=say` kannst du die Geschwindigkeit ueber `say_rate_wpm` steuern (ca. `200`-`260` sinnvoll).
-- `tts_sir_pronunciation` steuert die Audio-Lautung fuer das Wort `Sir` (z. B. `Sör`).
+- If `python3.11` is not found, set `JARVIS_PYTHON_BIN`.
+- If TTS fails, check `tts_engine`, `tts_model_path`, and `piper` availability.
+- If STT fails, check `whisper_binary`, `whisper_model_path`, and `ffmpeg`.
+- Optional alternative TTS engine: `tts_engine=say`.
