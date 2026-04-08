@@ -29,8 +29,8 @@ class AudioError(RuntimeError):
 DEFAULT_AUDIO_KEEP_ENTRIES = int(os.environ.get("JARVIS_AUDIO_TMP_KEEP", "30"))
 DEFAULT_TTS_KEEP_ENTRIES = int(os.environ.get("JARVIS_TTS_TMP_KEEP", "20"))
 DEFAULT_TMP_MAX_AGE_SECONDS = int(os.environ.get("JARVIS_TMP_MAX_AGE_SECONDS", str(12 * 60 * 60)))
-DEFAULT_WHISPER_BEAM_SIZE = int(os.environ.get("JARVIS_WHISPER_BEAM_SIZE", "5"))
-DEFAULT_WHISPER_BEST_OF = int(os.environ.get("JARVIS_WHISPER_BEST_OF", "5"))
+DEFAULT_WHISPER_BEAM_SIZE = int(os.environ.get("JARVIS_WHISPER_BEAM_SIZE", "4"))
+DEFAULT_WHISPER_BEST_OF = int(os.environ.get("JARVIS_WHISPER_BEST_OF", "4"))
 DEFAULT_WHISPER_NO_SPEECH_THOLD = float(os.environ.get("JARVIS_WHISPER_NO_SPEECH_THOLD", "0.70"))
 DEFAULT_WHISPER_ENTROPY_THOLD = float(os.environ.get("JARVIS_WHISPER_ENTROPY_THOLD", "2.10"))
 DEFAULT_WHISPER_LOGPROB_THOLD = float(os.environ.get("JARVIS_WHISPER_LOGPROB_THOLD", "-0.60"))
@@ -236,9 +236,27 @@ def _prepare_tts_text(
     if not prepared:
         return prepared
 
+    # Improve intelligibility before synthesis.
+    prepared = re.sub(r"`([^`]+)`", r"\1", prepared)
+    prepared = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1", prepared)
+    prepared = prepared.replace("&", " und ")
+    prepared = prepared.replace("z.B.", "zum Beispiel")
+    prepared = prepared.replace("bzw.", "beziehungsweise")
+    prepared = prepared.replace("u.a.", "unter anderem")
+    prepared = re.sub(r"\bca\.\b", "circa", prepared, flags=re.IGNORECASE)
+    prepared = re.sub(r"(?i)\bqwen\b", "kuen", prepared)
+    prepared = re.sub(r"\b(https?://\S+)\b", "Link", prepared)
+    prepared = re.sub(r"\s+", " ", prepared).strip()
+
     if sir_pronunciation:
         # Keep UI text untouched but normalize spoken output for "Sir".
         prepared = re.sub(r"(?i)\bsir\b", sir_pronunciation, prepared)
+
+    # Slightly clearer rhythm for German voices.
+    prepared = re.sub(r"(?i)\b(ja|gut|perfekt|verstanden)\b[, ]*", r"\1, ", prepared)
+    prepared = re.sub(r"\s+([,.;:!?])", r"\1", prepared)
+    prepared = re.sub(r"([,.;:!?])(?=\S)", r"\1 ", prepared)
+    prepared = re.sub(r"\s+", " ", prepared).strip()
 
     return prepared
 

@@ -52,6 +52,60 @@ TOOL_REQUEST_HINTS = (
     "mach",
 )
 
+DATE_HINTS = (
+    "welches datum",
+    "welcher tag",
+    "datum",
+    "date",
+    "heute ist",
+)
+
+TIME_HINTS = (
+    "wie spaet",
+    "wie spät",
+    "uhrzeit",
+    "wie viel uhr",
+    "wieviel uhr",
+    "time",
+    "aktuelle zeit",
+)
+
+READINESS_HINTS = (
+    "bist du da",
+    "bist du online",
+    "bist du bereit",
+    "bereit",
+    "online",
+    "jarvis",
+)
+
+WEEKDAY_HINTS = (
+    "montag",
+    "dienstag",
+    "mittwoch",
+    "donnerstag",
+    "freitag",
+    "samstag",
+    "sonntag",
+)
+
+CALENDAR_HINTS = (
+    "kalender",
+    "termin",
+    "event",
+    "eintrag",
+)
+
+GERMAN_WEEKDAY_BY_INDEX = {
+    0: "Montag",
+    1: "Dienstag",
+    2: "Mittwoch",
+    3: "Donnerstag",
+    4: "Freitag",
+    5: "Samstag",
+    6: "Sonntag",
+}
+
 
 def _looks_like_tool_request(user_message: str) -> bool:
     lowered = user_message.strip().lower()
@@ -91,6 +145,122 @@ def _quick_local_reply(user_message: str) -> str | None:
 
     if re.fullmatch(r"(ok(?:ay)?|passt|perfekt|super|alles klar)", lowered):
         return "Verstanden, Sir."
+
+    if re.search(r"\b(help|hilfe|was kannst du|capabilities|funktionen)\b", lowered):
+        return (
+            "Ich kann lokal Chat, Erinnerungen, Kalendertermine, App/URL-Start, Zwischenablage sowie sichere Dateiaktionen "
+            "mit Freigaben ausfuehren. Nennen Sie Aufgabe plus Zeit/Ziel, dann uebernehme ich den Rest."
+        )
+
+    return None
+
+
+def _quick_system_status_reply(user_message: str, settings: dict[str, Any]) -> str | None:
+    normalized = re.sub(r"\s+", " ", user_message.strip())
+    lowered = normalized.lower()
+    if not lowered:
+        return None
+
+    if len(lowered) > 140:
+        return None
+
+    status_hints = (
+        "status",
+        "modell",
+        "model",
+        "whisper",
+        "stt",
+        "tts",
+        "engine",
+        "welches modell",
+    )
+    if not any(hint in lowered for hint in status_hints):
+        return None
+
+    model = str(settings.get("model_name", "-")).strip() or "-"
+    whisper_model = Path(str(settings.get("whisper_model_path", "")).strip()).name or "auto"
+    tts_engine = str(settings.get("tts_engine", "piper")).strip() or "piper"
+    tts_voice = str(settings.get("tts_voice", "")).strip() or "-"
+
+    return (
+        f"Systemstatus: Modell {model}, STT {whisper_model}, "
+        f"TTS {tts_engine} ({tts_voice}), alles lokal."
+    )
+
+
+def _quick_utility_reply(user_message: str) -> str | None:
+    normalized = re.sub(r"\s+", " ", user_message.strip())
+    lowered = normalized.lower()
+    if not lowered:
+        return None
+
+    if len(lowered) > 120:
+        return None
+
+    if any(hint in lowered for hint in TIME_HINTS):
+        now = datetime.now()
+        return f"Aktuelle lokale Zeit: {now.strftime('%H:%M')} Uhr."
+
+    if any(hint in lowered for hint in DATE_HINTS) or re.fullmatch(r"(heute\??|welches datum\??)", lowered):
+        now = datetime.now()
+        weekday = GERMAN_WEEKDAY_BY_INDEX.get(now.weekday(), now.strftime("%A"))
+        return f"Heute ist {weekday}, der {now.strftime('%d.%m.%Y')}."
+
+    if re.fullmatch(r"(jarvis\??|bist du da\??|online\??|bereit\??)", lowered) or any(
+        hint in lowered for hint in READINESS_HINTS
+    ):
+        if len(lowered.split()) <= 4:
+            return "Ja, Sir. Systeme laufen stabil und ich bin einsatzbereit."
+
+    return None
+
+
+def _quick_clarification_reply(user_message: str) -> str | None:
+    normalized = re.sub(r"\s+", " ", user_message.strip())
+    lowered = normalized.lower()
+    if not lowered:
+        return None
+
+    if len(lowered) > 180:
+        return None
+
+    has_time_hint = (
+        re.search(r"\b\d{1,2}(?::|\.)?\d{0,2}\s*uhr\b", lowered) is not None
+        or re.search(r"\b\d{1,2}\.\d{1,2}(?:\.\d{2,4})?\b", lowered) is not None
+        or any(word in lowered for word in ("heute", "morgen", "uebermorgen", "übermorgen", *WEEKDAY_HINTS))
+    )
+    has_quote_content = re.search(r"\"[^\"]+\"|'[^']+'", normalized) is not None
+    has_content_hint = has_quote_content or any(
+        hint in lowered
+        for hint in (
+            "dass",
+            "lautet",
+            "sagt",
+            "heisst",
+            "heißt",
+            "inhalt",
+            "text",
+            "an ",
+            "ans ",
+            "daran",
+        )
+    )
+
+    if any(word in lowered for word in ("erinnerung", "erinner mich", "remind me")):
+        if not has_time_hint and not has_content_hint:
+            return (
+                "Damit ich die Erinnerung sauber anlege, brauche ich Zeitpunkt und Inhalt. "
+                "Beispiel: `Jarvis, erinnere mich morgen um 10 Uhr daran, Licht auszumachen.`"
+            )
+        if not has_time_hint:
+            return "Für die Erinnerung fehlt noch der Zeitpunkt. Wann genau soll ich sie setzen, Sir?"
+        if not has_content_hint and len(lowered.split()) <= 12:
+            return "Für die Erinnerung fehlt noch der genaue Inhalt. Was soll der Reminder sagen, Sir?"
+
+    if any(hint in lowered for hint in CALENDAR_HINTS):
+        has_calendar_verb = any(word in lowered for word in ("plane", "plan", "eintragen", "trag", "schedule"))
+        if has_calendar_verb and not has_time_hint:
+            return "Ich kann den Termin sofort eintragen. Nennen Sie bitte Startzeit und optional Dauer."
 
     return None
 
@@ -184,6 +354,8 @@ class AgentService:
             build_persona_system_prompt(profile),
             "Wenn ein Tool noetig ist, nutze die Tool-Route statt Halluzination.",
             "Antworte standardmaessig kurz und direkt (maximal 4 Saetze), ausser der Nutzer fordert Details.",
+            "Wenn Fakten unsicher sind, benenne Unsicherheit klar. Erfinde keine Quellen, Namen oder Ereignisse.",
+            "Wenn die Anfrage mehrdeutig ist, stelle genau eine kurze Rueckfrage statt Annahmen zu treffen.",
         ]
 
         if memories:
@@ -330,6 +502,45 @@ class AgentService:
                 run_id=run_id,
                 state="done",
                 detail="Schnellantwort lokal",
+            )
+            return
+
+        quick_status = _quick_system_status_reply(normalized_user_message, settings)
+        if quick_status:
+            quick_text = _normalize_honorifics(quick_status)
+            await self.db.add_message(session_id=session_id, role="assistant", content=quick_text)
+            await self._emit_message(session_id, run_id, quick_text)
+            await self._emit_state(
+                session_id=session_id,
+                run_id=run_id,
+                state="done",
+                detail="Statusantwort lokal",
+            )
+            return
+
+        quick_utility = _quick_utility_reply(normalized_user_message)
+        if quick_utility:
+            quick_text = _normalize_honorifics(quick_utility)
+            await self.db.add_message(session_id=session_id, role="assistant", content=quick_text)
+            await self._emit_message(session_id, run_id, quick_text)
+            await self._emit_state(
+                session_id=session_id,
+                run_id=run_id,
+                state="done",
+                detail="Utility-Antwort lokal",
+            )
+            return
+
+        clarification = _quick_clarification_reply(normalized_user_message)
+        if clarification:
+            clarification_text = _normalize_honorifics(clarification)
+            await self.db.add_message(session_id=session_id, role="assistant", content=clarification_text)
+            await self._emit_message(session_id, run_id, clarification_text)
+            await self._emit_state(
+                session_id=session_id,
+                run_id=run_id,
+                state="done",
+                detail="Rueckfrage fuer praezisen Auftrag",
             )
             return
 
