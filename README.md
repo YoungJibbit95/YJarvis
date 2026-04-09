@@ -6,6 +6,8 @@
 [![Last Commit](https://img.shields.io/github/last-commit/YoungJibbit95/YJarvis?style=flat)](https://github.com/YoungJibbit95/YJarvis/commits/main)
 
 A fully local desktop assistant for macOS (Apple Silicon). No cloud calls.
+Keep in mind that this is a german project for now, i will add support for english later.
+But you should be able to change it yourself, for that you need to download a english piper model and replace the german model in settings.
 
 ## Stack
 
