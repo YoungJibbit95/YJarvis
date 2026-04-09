@@ -9,6 +9,8 @@ A fully local desktop assistant for macOS (Apple Silicon). No cloud calls.
 Keep in mind that this is a german project for now, i will add support for english later.
 But you should be able to change it yourself, for that you need to download a english piper model and replace the piper model path with your downloaded model. Put TTS models in `/runtime/models/`. Then set your models name in TTS Voice in settings and it should work.
 
+For now, YJarvis sadly doesnt sound like the real version, if someone is able to find a voice model of him in german or english, please make a pull request. I want to add that as soon as possible but for now he only acts like Jarvis.
+
 ## Stack
 
 - Python FastAPI agent (`apps/agent`)
