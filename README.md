@@ -7,7 +7,7 @@
 
 A fully local desktop assistant for macOS (Apple Silicon). No cloud calls.
 Keep in mind that this is a german project for now, i will add support for english later.
-But you should be able to change it yourself, for that you need to download a english piper model and replace the german model in settings.
+But you should be able to change it yourself, for that you need to download a english piper model and replace the piper model path with your downloaded model. Put TTS models in `/runtime/models/`. Then set your models name in TTS Voice in settings and it should work.
 
 ## Stack
 
