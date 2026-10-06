@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
+
+from .persistence import migrate_database
 
 
 def utc_now_iso() -> str:
@@ -104,117 +107,10 @@ class Database:
         return row
 
     async def init(self) -> None:
+        # Validate/adopt before WAL configuration or legacy default seeding.
+        # The worker owns its SQLite connection and the complete transaction.
+        await asyncio.to_thread(migrate_database, self.db_path)
         async with self._connect() as connection:
-            await connection.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS sessions (
-                    id TEXT PRIMARY KEY,
-                    created_at TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS tool_runs (
-                    id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    run_id TEXT NOT NULL,
-                    tool_name TEXT NOT NULL,
-                    tool_input TEXT NOT NULL,
-                    result TEXT,
-                    error TEXT,
-                    success INTEGER NOT NULL,
-                    created_at TEXT NOT NULL,
-                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS approvals (
-                    id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    run_id TEXT NOT NULL,
-                    tool_name TEXT NOT NULL,
-                    tool_input TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    decision TEXT,
-                    requested_at TEXT NOT NULL,
-                    decided_at TEXT,
-                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS memory_items (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT,
-                    content TEXT NOT NULL,
-                    importance REAL NOT NULL DEFAULT 0.5,
-                    created_at TEXT NOT NULL,
-                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS settings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS allowed_paths (
-                    path TEXT PRIMARY KEY
-                );
-
-                CREATE TABLE IF NOT EXISTS smarthome_entities (
-                    id TEXT PRIMARY KEY,
-                    entity_type TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    state TEXT NOT NULL,
-                    attributes TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS learned_commands (
-                    trigger TEXT PRIMARY KEY,
-                    tool_name TEXT NOT NULL,
-                    tool_input TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    usage_count INTEGER NOT NULL DEFAULT 0,
-                    success_count INTEGER NOT NULL DEFAULT 0,
-                    failure_count INTEGER NOT NULL DEFAULT 0
-                );
-
-                CREATE TABLE IF NOT EXISTS tool_learning_stats (
-                    tool_name TEXT PRIMARY KEY,
-                    success_count INTEGER NOT NULL DEFAULT 0,
-                    failure_count INTEGER NOT NULL DEFAULT 0,
-                    average_latency_ms REAL NOT NULL DEFAULT 0,
-                    last_latency_ms INTEGER NOT NULL DEFAULT 0,
-                    last_used_at TEXT
-                );
-
-                CREATE VIRTUAL TABLE IF NOT EXISTS memory_items_fts
-                USING fts5(content, content='memory_items', content_rowid='id');
-
-                CREATE TRIGGER IF NOT EXISTS memory_items_ai AFTER INSERT ON memory_items BEGIN
-                    INSERT INTO memory_items_fts(rowid, content) VALUES (new.id, new.content);
-                END;
-
-                CREATE TRIGGER IF NOT EXISTS memory_items_ad AFTER DELETE ON memory_items BEGIN
-                    INSERT INTO memory_items_fts(memory_items_fts, rowid, content)
-                    VALUES('delete', old.id, old.content);
-                END;
-
-                CREATE TRIGGER IF NOT EXISTS memory_items_au AFTER UPDATE ON memory_items BEGIN
-                    INSERT INTO memory_items_fts(memory_items_fts, rowid, content)
-                    VALUES('delete', old.id, old.content);
-                    INSERT INTO memory_items_fts(rowid, content)
-                    VALUES (new.id, new.content);
-                END;
-                """
-            )
-
             for key, value in DEFAULT_SETTINGS.items():
                 await connection.execute(
                     "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)",
