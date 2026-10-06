@@ -1,0 +1,8 @@
+# A correctness baseline, not a formatting migration or a full lint audit.
+target-version = "py311"
+extend-exclude = ["runtime"]
+
+[lint]
+# Syntax/undefined names and unambiguous correctness issues only.
+# Keep existing indentation, line lengths, and unused-import cleanup out of YJ2-00.
+select = ["E9", "F63", "F7", "F82"]

@@ -10,6 +10,7 @@
     "dev": "concurrently -k \"npm run dev:ollama\" \"npm run dev:agent\" \"wait-on tcp:127.0.0.1:8787 tcp:127.0.0.1:11434 && JARVIS_BACKEND_MANAGED=external npm run dev:desktop\"",
     "dev:ollama": "./scripts/dev-ollama.sh",
     "dev:desktop": "npm run dev --workspace apps/desktop",
+    "typecheck": "npm run typecheck --workspace apps/desktop",
     "build": "npm run build --workspace apps/desktop",
     "dev:agent": "PYTHONPATH=apps/agent ${JARVIS_PYTHON_BIN:-./.venv/bin/python} -m uvicorn jarvis_agent.main:app --host ${JARVIS_AGENT_HOST:-127.0.0.1} --port ${JARVIS_AGENT_PORT:-8787}",
     "dev:agent:reload": "PYTHONPATH=apps/agent ${JARVIS_PYTHON_BIN:-./.venv/bin/python} -m uvicorn jarvis_agent.main:app --host ${JARVIS_AGENT_HOST:-127.0.0.1} --port ${JARVIS_AGENT_PORT:-8787} --reload"
