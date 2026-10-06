@@ -4,7 +4,8 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    # Validate migration branches even before a PR event is available.
+    branches: [main, "yjv2/**"]
   workflow_dispatch:
 
 permissions:
