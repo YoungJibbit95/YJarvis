@@ -21,10 +21,20 @@ For now, YJarvis sadly doesnt sound like the real version, if someone is able to
 - Piper for text-to-speech (TTS)
 - Raycast Deeplink integration (optional, local)
 
+## Development and V2 migration
+
+See [the development guide](docs/development.md) for exact setup/check commands,
+CI coverage limits, environment loading, and the manual macOS checklist.
+The [V2 architecture and browser-agent master prompt](docs/architecture/README.md)
+is the migration source of truth. Follow [CONTRIBUTING.md](CONTRIBUTING.md): one
+approved step, one PR, external review, then explicit user authorization to proceed.
+YJ2-00 adds infrastructure only; the product behavior described below is unchanged.
+
 ## Requirements (macOS)
 
 ```bash
-brew install python@3.11 ollama ffmpeg whisper-cpp portaudio
+brew install python@3.11 node@22 ollama ffmpeg whisper-cpp portaudio libsndfile
+export PATH="$(brew --prefix node@22)/bin:$PATH"
 ```
 
 ## Python Setup
@@ -32,16 +42,23 @@ brew install python@3.11 ollama ffmpeg whisper-cpp portaudio
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
-pip install -U pip
-pip install -r apps/agent/requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r apps/agent/requirements.txt -r requirements-dev.txt
 ```
 
 ## Local Model Setup
 
 ### 1) LLM (Ollama)
 
+In a separate terminal (unless Ollama is already running):
+
 ```bash
 ollama serve
+```
+
+Then, in the project terminal:
+
+```bash
 ollama pull qwen2.5:3b-instruct
 ```
 
@@ -60,7 +77,7 @@ Set the absolute model path in UI: `Settings -> Piper model path`.
 ## Run
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -180,8 +197,16 @@ Piper prosody:
 
 ```bash
 source .venv/bin/activate
-pytest -q
+python -m pip check
+python -m pytest -q
+python -m ruff check apps/agent/jarvis_agent tests
+npm run typecheck
+npm run build
 ```
+
+The four CI checks are `python-tests`, `python-lint`, `desktop-typecheck`, and
+`desktop-build`. They test the existing Python suite and static desktop build on
+Linux, not interactive macOS audio/automation or a packaged Electron app.
 
 ## Troubleshooting
 

@@ -436,7 +436,7 @@ function App() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const analyserDataRef = useRef<Uint8Array | null>(null);
+  const analyserDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const monitorRafRef = useRef<number | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -1051,7 +1051,7 @@ function App() {
         }
       });
 
-      const browserWindow = window as Window & { webkitAudioContext?: typeof AudioContext };
+      const browserWindow = window as typeof window & { webkitAudioContext?: typeof AudioContext };
       const AudioContextCtor = browserWindow.AudioContext || browserWindow.webkitAudioContext;
       if (!AudioContextCtor) {
         throw new Error("AudioContext wird in diesem Browser nicht unterstuetzt.");

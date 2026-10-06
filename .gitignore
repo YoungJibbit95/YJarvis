@@ -14,3 +14,8 @@ apps/desktop/.vite
 __pycache__
 *.pyc
 .pytest_cache
+.ruff_cache
+*.egg-info/
+.coverage
+htmlcov/
+runtime/*.db-*
