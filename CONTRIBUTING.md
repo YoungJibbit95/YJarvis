@@ -10,12 +10,12 @@ user decisions. The architecture is a target; it is not a reason to implement
 later subsystems early. Read the accepted
 [Windows/cross-platform addendum](docs/architecture/02_WINDOWS_CROSS_PLATFORM_ARCHITECTURE_ADDENDUM.md).
 Windows 11 x64 is the primary current target; macOS Apple Silicon stays first-class
-and Linux remains headless CI. This does not claim Windows runtime support yet.
+and Linux remains headless CI. Text/Core startup does not imply native tool/audio parity.
 
-YJ2-00 through YJ2-03 are accepted. The current authorization is **YJW-00A only**:
-establish Windows test and CI coverage without changing product behavior.
-Keep all isolation/security assertions; no Windows skips or xfails to hide failures.
-Runtime launchers, providers, file safety, audio and YJ2-04 remain out of scope.
+YJ2-00 through YJ2-03 and YJW-00A are accepted. The current authorization is
+**YJW-00B only**: native Windows Text/Core startup through a shared Node launcher,
+Python discovery, Ollama reuse and owned-process cleanup. Preserve macOS behavior.
+Providers, file safety, audio, packaging and YJ2-04 remain out of scope.
 Architectural violations require a documented decision and explicit approval,
 not an opportunistic refactor.
 
@@ -28,8 +28,8 @@ Never work directly on `main` or overwrite another contributor's work.
 For the current step:
 
 ```text
-Branch: yjv2/w00a-windows-ci-baseline
-PR: [YJW-00A] Establish Windows test and CI baseline
+Branch: yjv2/w00b-windows-core-startup
+PR: [YJW-00B] Enable native Windows core startup
 ```
 
 Use the PR template in full. Keep changes narrowly reviewable and reversible.
@@ -53,6 +53,7 @@ with the project virtual environment active and dependencies installed:
 python -m pip check
 python -m pytest -q
 python -m ruff check apps/agent/jarvis_agent tests
+npm run test:startup
 npm ci
 npm run typecheck
 node --check apps/desktop/electron/main.cjs
@@ -91,6 +92,5 @@ available checks are green, hand it to the user for external ChatGPT review
 against the actual diff and the architecture, then stop completely. No next
 branch, next PR, scaffold, or preparatory commit is allowed. CI success is not
 user approval. Only explicit user authorization after external review unlocks
-the next step. Windows bootstrap is split into small PRs: YJW-00A establishes
-the automated baseline; YJW-00B or later may address runtime startup. Neither
-YJW-00B nor YJ2-04 is authorized by this document.
+the next step. After YJW-00B, YJW-01, YJ2-04 and audio work remain blocked until
+the user explicitly authorizes one next step following external review.

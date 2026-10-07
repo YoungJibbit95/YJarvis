@@ -5,7 +5,7 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
-    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "dev": "node ../../scripts/dev.mjs desktop",
     "typecheck": "tsc --noEmit",
     "build": "vite build",
     "preview": "vite preview"

@@ -49,3 +49,10 @@ YJ2-03 was externally accepted and PR #5 squash-merged as `65490d2`. Its complet
 main CI passed before YJW-00A began. The user split Windows bootstrap into small
 PRs and authorized only [YJW-00A: Windows test/CI baseline](windows-test-ci-baseline.md).
 Runtime startup (YJW-00B or later) and YJ2-04 remain behind the external-review gate.
+
+## YJW-00B authorization after YJW-00A review
+
+PR #6 was externally accepted and squash-merged as `495a6c6`. All six main checks
+passed before starting [YJW-00B: native Windows Text/Core startup](windows-core-startup.md).
+Only startup, Python discovery, Ollama reuse and owned-process lifecycle are in
+scope. Tools, audio, file safety, packaging, YJW-01 and YJ2-04 remain unauthorized.
