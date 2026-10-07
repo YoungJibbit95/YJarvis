@@ -12,11 +12,12 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from jarvis_agent import agent_service as response_module
-from jarvis_agent import agent_service as routing_module
 from jarvis_agent.agent_service import AgentService
 from jarvis_agent.db import Database
 from jarvis_agent.llm import LlmError
+from jarvis_agent.orchestration import legacy_responses as response_module
+from jarvis_agent.orchestration import legacy_routing as routing_module
+from jarvis_agent.orchestration import turn_engine as engine_module
 from jarvis_agent.tools import ToolRegistry
 from jarvis_agent.tools.base import ToolResult
 
@@ -45,6 +46,15 @@ def rig(tmp_path, monkeypatch):
     async def publish(session_id, payload):
         assert session_id == "session"
         assert datetime.fromisoformat(payload["timestamp"]).tzinfo is not None
+        expected = {"event", "run_id", "timestamp"}
+        expected |= {
+            "run_state": {"state", "detail"},
+            "token": {"token"},
+            "message": {"role", "content"},
+        }[payload["event"]]
+        if payload.get("state") == "approval_required":
+            expected.add("data")
+        assert set(payload) == expected
         events.append(payload)
         trace.append("event:" + payload.get("state", payload["event"]))
 
@@ -85,6 +95,8 @@ def rig(tmp_path, monkeypatch):
 
     compact_mock = AsyncMock(side_effect=compact)
     monkeypatch.setattr(response_module, "maybe_compact_session", compact_mock)
+    monkeypatch.setattr(engine_module, "maybe_compact_session", compact_mock)
+    monkeypatch.setattr(engine_module, "time", SimpleNamespace(perf_counter=lambda: 1.0))
     def make_service():
         return AgentService(db, SimpleNamespace(publish=publish), tools, tmp_path / "profile.json")
 
@@ -388,5 +400,81 @@ def test_background_entry_point_schedules_existing_public_coroutine(rig, monkeyp
         assert rig.service.start_run_background("session", "run", "hallo") is None
         await tasks[0]
         rig.service.start_run.assert_awaited_once_with(session_id="session", run_id="run", user_message="hallo")
+
+    asyncio.run(check())
+
+
+def test_token_interval_flushes_before_size_threshold(rig, monkeypatch):
+    ticks = iter([1.0, 1.03, 1.03, 1.04, 1.04])
+    monkeypatch.setattr(response_module, "time", SimpleNamespace(perf_counter=lambda: next(ticks)))
+    rig.set_stream(["ab", "cd"])
+    asyncio.run(rig.service.start_run("session", "run", "Erzaehle etwas ueber Sterne"))
+    assert [event["token"] for event in rig.events if event["event"] == "token"] == ["ab", "cd"]
+    assert rig.events[-1]["state"] == "done"
+
+
+def test_learned_command_wins_over_heuristic_and_planner(rig):
+    rig.service = rig.enable("JARVIS_ENABLE_TOOL_PLANNER")
+
+    async def check():
+        await rig.db.upsert_learned_command(
+            trigger="oeffne Safari", tool_name="open_app", tool_input={"app_name": "Notes"},
+        )
+        await rig.service.start_run("session", "run", "oeffne Safari")
+        assert rig.events[-1]["data"]["approval"]["tool_input"] == {"app_name": "Notes"}
+        rig.planner.assert_not_awaited()
+        rig.tools.execute.assert_not_awaited()
+
+    asyncio.run(check())
+
+
+def test_prompt_keeps_memory_learning_signals_and_filters_non_conversation_roles(rig):
+    rig.set_stream(["Antwort"])
+
+    async def check():
+        await rig.db.add_memory_item("session", "Sterne sind wichtig", 0.9)
+        await rig.db.record_tool_learning(tool_name="open_app", success=True, latency_ms=42)
+        await rig.db.add_message(session_id="session", role="tool", content="not conversation")
+        await rig.db.add_message(session_id="session", role="assistant", content="earlier answer")
+        await rig.service.start_run("session", "run", "Sterne")
+        messages = rig.stream.call_args.kwargs["messages"]
+        assert "- Sterne sind wichtig" in messages[0]["content"]
+        assert "- open_app: 100% Erfolg, 42 ms Durchschnitt" in messages[0]["content"]
+        assert messages[1:] == [
+            {"role": "assistant", "content": "earlier answer"},
+            {"role": "user", "content": "Sterne"},
+        ]
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("kind", ["reply", "intent", "conversation"])
+def test_routing_can_be_replaced_without_replacing_lifecycle(rig, kind):
+    from jarvis_agent.orchestration.legacy_routing import LegacyRoute
+    from jarvis_agent.tool_intent import ToolCallIntent
+
+    # Deliberately use text which the legacy router would reject. The engine
+    # must coordinate the supplied result, not run a second hidden router.
+    result = {
+        "reply": LegacyRoute("effective", reply="Injected response", detail="Injected route"),
+        "intent": LegacyRoute("effective", intent=ToolCallIntent("open_app", {"app_name": "Safari"}, "injected")),
+        "conversation": LegacyRoute("effective"),
+    }[kind]
+    route = AsyncMock(return_value=result)
+    rig.service.turn_engine.routing = SimpleNamespace(route=route)
+    rig.set_stream(["Conversation"])
+
+    async def check():
+        await rig.service.start_run("session", "run", "mach xyz")
+        route.assert_awaited_once()
+        assert route.call_args.args[:3] == ("session", "run", "mach xyz")
+        assert event_order(rig)[:2] == ["received", "thinking"]
+        if kind == "intent":
+            assert event_order(rig)[2:] == ["approval_required"]
+            assert len(await rig.db.list_pending_approvals()) == 1
+        else:
+            assert event_order(rig)[-2:] == ["message", "done"]
+            assert rig.events[-2]["content"] == ("Injected response" if kind == "reply" else "Conversation")
+        rig.tools.execute.assert_not_awaited()
 
     asyncio.run(check())

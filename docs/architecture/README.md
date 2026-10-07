@@ -28,3 +28,17 @@ roadmap steps; YJ2-00 does not retrofit them into legacy runtime code.
 Operational entry points: [development setup](../development.md),
 [contribution/review protocol](../../CONTRIBUTING.md), and
 [agent guardrails](../../AGENTS.md).
+
+## Accepted handoff updates (2026-10-07)
+
+The user authorized Codex implementation and small, releasable PR cycles with
+the same mandatory external-review stop gate. The original source above remains
+unchanged, including its historical browser-agent wording.
+
+- [Windows/cross-platform addendum](02_WINDOWS_CROSS_PLATFORM_ARCHITECTURE_ADDENDUM.md):
+  the supplied addendum, copied verbatim; target requirements, not a Windows port.
+- [YJ2-03 TurnEngine shell](turn-engine-shell.md): current extraction, preserved
+  behavior, verification limits and review questions.
+
+YJW-00 is the proposed next step after YJ2-03 external acceptance and explicit
+user authorization. No next-step implementation is included here.
