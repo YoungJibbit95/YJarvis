@@ -24,11 +24,12 @@ import {
   sendChat,
   speak,
   transcribe,
-  waitForBackend,
   wsUrl,
   type ChatMessage
 } from "./api";
 import { AppShell, type TabId } from "./app/AppShell";
+import { SetupNotice } from "./setup/SetupStatusView";
+import type { SetupCheck } from "./setup/types";
 
 type AssistantMode = "idle" | "thinking" | "speaking";
 
@@ -38,6 +39,7 @@ type CommandItem = {
   hint: string;
   keywords: string[];
   run: () => void;
+  disabled?: boolean;
 };
 
 type TimelineEntry = {
@@ -373,6 +375,7 @@ const CommandPalette = memo(function CommandPalette({
               <button
                 className="secondary"
                 type="button"
+                disabled={item.disabled}
                 onClick={() => {
                   onRun(item);
                 }}
@@ -389,7 +392,10 @@ const CommandPalette = memo(function CommandPalette({
   );
 });
 
-function App() {
+function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheckSetup: () => Promise<void> }) {
+  const chatAvailable = setupCheck.state === "ready" || setupCheck.state === "degraded";
+  const chatAvailableRef = useRef(chatAvailable);
+  chatAvailableRef.current = chatAvailable;
   const [activeTab, setActiveTab] = useState<TabId>("chat");
   const [sessionId, setSessionId] = useState<string>("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -775,6 +781,9 @@ function App() {
   }
 
   async function submitMessage(message: string, source: "text" | "voice"): Promise<boolean> {
+    if (!chatAvailableRef.current) {
+      return false;
+    }
     const trimmed = message.trim();
     if (!trimmed || !sessionId || busyRef.current) {
       return false;
@@ -810,6 +819,7 @@ function App() {
   }
 
   async function flushVoiceQueue() {
+    if (!chatAvailableRef.current) return;
     if (voiceFlushRunningRef.current || busyRef.current || !sessionId) {
       return;
     }
@@ -837,6 +847,7 @@ function App() {
   }
 
   function enqueueVoiceMessage(message: string) {
+    if (!chatAvailableRef.current) return;
     const trimmed = message.trim();
     if (!trimmed) {
       return;
@@ -847,7 +858,7 @@ function App() {
   }
 
   async function handleRecordedSegment(blob: Blob) {
-    if (blob.size === 0) {
+    if (blob.size === 0 || !chatAvailableRef.current) {
       return;
     }
 
@@ -1036,6 +1047,9 @@ function App() {
   }
 
   async function startVoiceMode() {
+    if (!chatAvailableRef.current) {
+      return;
+    }
     if (voiceModeEnabledRef.current) {
       return;
     }
@@ -1050,6 +1064,11 @@ function App() {
           autoGainControl: true
         }
       });
+
+      if (!chatAvailableRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
 
       const browserWindow = window as typeof window & { webkitAudioContext?: typeof AudioContext };
       const AudioContextCtor = browserWindow.AudioContext || browserWindow.webkitAudioContext;
@@ -1119,6 +1138,7 @@ function App() {
   const commandItems = useMemo<CommandItem[]>(() => {
     const quickActionItems = QUICK_ACTIONS.map((action, index) => ({
       id: `quick-${index}`,
+      disabled: !chatAvailable,
       label: action.label,
       hint: action.prompt,
       keywords: ["quick", "prompt", action.label.toLowerCase(), ...action.prompt.toLowerCase().split(" ")],
@@ -1159,6 +1179,7 @@ function App() {
       },
       {
         id: "toggle-voice-input",
+        disabled: !chatAvailable && !voiceModeEnabled,
         label: voiceModeEnabled ? "Voice Input: Stop" : "Voice Input: Start",
         hint: voiceModeEnabled ? "Sprachmodus deaktivieren" : "Sprachmodus aktivieren",
         keywords: ["voice", "mic", "input", voiceModeEnabled ? "stop" : "start"],
@@ -1178,7 +1199,7 @@ function App() {
         run: () => setVoiceRepliesEnabled((previous) => !previous)
       }
     ];
-  }, [voiceModeEnabled, voiceRepliesEnabled, switchTab, sessionId, busy]);
+  }, [voiceModeEnabled, voiceRepliesEnabled, switchTab, sessionId, busy, chatAvailable]);
 
   const filteredCommandItems = useMemo(() => {
     const query = commandQuery.trim().toLowerCase();
@@ -1241,16 +1262,18 @@ function App() {
   }, [busy, sessionId]);
 
   useEffect(() => {
+    if (!chatAvailable) {
+      voiceQueueRef.current = [];
+      stopVoiceModeInternal({ updateStatus: false });
+    }
+  }, [chatAvailable]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function bootstrap() {
       try {
-        setStatus("Warte auf lokalen Agent...");
-        await waitForBackend(45_000);
-        if (cancelled) {
-          return;
-        }
-
+        // SetupGate already confirmed the existing backend connection.
         setStatus("Agent erreichbar, erstelle Session...");
         const session = await createSession();
         if (cancelled) {
@@ -1490,6 +1513,7 @@ function App() {
       setSettings(saved);
       setSettingsDraft(saved);
       setStatus("Settings gespeichert.");
+      void onRecheckSetup();
     } catch (error) {
       setStatus((error as Error).message);
     }
@@ -1590,7 +1614,7 @@ function App() {
                     onClick={() => {
                       void runQuickAction(action.prompt);
                     }}
-                    disabled={!sessionId}
+                    disabled={!sessionId || !chatAvailable}
                   >
                     {action.label}
                   </button>
@@ -1600,6 +1624,8 @@ function App() {
             </div>
 
             <textarea
+              disabled={!chatAvailable}
+              aria-label="Nachricht an Jarvis"
               ref={composerInputRef}
               value={input}
               onChange={(event) => setInput(event.target.value)}
@@ -1610,6 +1636,7 @@ function App() {
               <button
                 type="button"
                 className={`record ${voiceModeEnabled ? "active" : ""}`}
+                disabled={!chatAvailable && !voiceModeEnabled}
                 onClick={() => {
                   if (voiceModeEnabled) {
                     stopVoiceMode();
@@ -1629,7 +1656,7 @@ function App() {
                 {voiceRepliesEnabled ? "Antwort: Sprache" : "Text only"}
               </button>
 
-              <button type="submit" disabled={busy || !sessionId}>
+              <button type="submit" disabled={busy || !sessionId || !chatAvailable}>
                 {busy ? "Läuft..." : "Senden"}
               </button>
             </div>
@@ -1885,6 +1912,7 @@ function App() {
   return (
     <>
       <AppShell
+        notice={<SetupNotice check={setupCheck} onRetry={() => void onRecheckSetup()} />}
         activeTab={activeTab}
         onNavigate={switchTab}
         onOpenCommands={() => setCommandPaletteOpen(true)}

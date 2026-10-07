@@ -1,6 +1,7 @@
 @import "./design-system/tokens.css";
 @import "./design-system/primitives.css";
 @import "./app/app-shell.css";
+@import "./setup/setup.css";
 
 * {
   box-sizing: border-box;

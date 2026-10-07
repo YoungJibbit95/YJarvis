@@ -22,6 +22,7 @@ type AppShellProps = NavigationProps & {
   runtime: RuntimeValues;
   onOpenCommands: () => void;
   children: ReactNode;
+  notice?: ReactNode;
 };
 
 const NAVIGATION: ReadonlyArray<{ id: TabId; label: string }> = [
@@ -45,7 +46,7 @@ function GlobalCommandTrigger({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-function AppHeader({ onOpenCommands }: { onOpenCommands: () => void }) {
+export function AppHeader({ onOpenCommands }: { onOpenCommands?: () => void }) {
   return (
     <header className="shell-header">
       <div className="shell-identity">
@@ -55,7 +56,7 @@ function AppHeader({ onOpenCommands }: { onOpenCommands: () => void }) {
           <p>Dein persönlicher Assistent</p>
         </div>
       </div>
-      <GlobalCommandTrigger onOpen={onOpenCommands} />
+      {onOpenCommands ? <GlobalCommandTrigger onOpen={onOpenCommands} /> : null}
     </header>
   );
 }
@@ -114,12 +115,15 @@ function PrimaryNavigation({ activeTab, onNavigate }: NavigationProps) {
   );
 }
 
-export function AppShell({ activeTab, onNavigate, runtime, onOpenCommands, children }: AppShellProps) {
+export function AppShell({ activeTab, onNavigate, runtime, onOpenCommands, children, notice }: AppShellProps) {
   return (
     <div className="app-shell">
       <a className="shell-skip-link" href="#shell-content">Zum Inhalt</a>
       <AppHeader onOpenCommands={onOpenCommands} />
-      <RuntimeStatus values={runtime} />
+      <div className="shell-status-area">
+        <RuntimeStatus values={runtime} />
+        {notice}
+      </div>
       <div className="shell-body">
         <PrimaryNavigation activeTab={activeTab} onNavigate={onNavigate} />
         <main id="shell-content" className="shell-content" tabIndex={-1} aria-labelledby={`shell-nav-${activeTab}`}>
