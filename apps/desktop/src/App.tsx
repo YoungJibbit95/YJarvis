@@ -28,8 +28,8 @@ import {
   wsUrl,
   type ChatMessage
 } from "./api";
+import { AppShell, type TabId } from "./app/AppShell";
 
-type TabId = "chat" | "approvals" | "settings" | "smarthome";
 type AssistantMode = "idle" | "thinking" | "speaking";
 
 type CommandItem = {
@@ -1883,75 +1883,27 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
-      <div className="fx-noise" aria-hidden="true" />
-      <header className="app-header">
-        <div className="brand-block">
-          <h1>YJARVIS // LOCAL CORE</h1>
-          <p>Offline assistant runtime with transparent, approval-based actions.</p>
-        </div>
-        <div className="core-orb" aria-hidden="true" />
-        <div className="header-actions">
-          <button
-            type="button"
-            className="secondary command-button"
-            onClick={() => {
-              setCommandPaletteOpen(true);
-            }}
-          >
-            Command
-            <kbd>⌘K</kbd>
-          </button>
-          <div className="env-pill">
-            {window.jarvisDesktop?.platform || "web"} · Electron {window.jarvisDesktop?.versions.electron || "-"}
-          </div>
-        </div>
-      </header>
-
-      <section className="status-strip">
-        <article className={`status-chip ${voiceModeEnabled ? "live" : ""}`}>
-          <span>Voice Input</span>
-          <strong>{voiceModeEnabled ? "Armed" : "Standby"}</strong>
-        </article>
-        <article className={`status-chip ${assistantMode === "speaking" ? "live" : ""}`}>
-          <span>Core</span>
-          <strong>{assistantMode}</strong>
-        </article>
-        <article className={`status-chip ${isTabPending ? "live" : ""}`}>
-          <span>UI Render</span>
-          <strong>{isTabPending ? "Switching" : "Stable"}</strong>
-        </article>
-        <article className="status-chip">
-          <span>Reply Mode</span>
-          <strong>{voiceRepliesEnabled ? "Voice + Text" : "Text Only"}</strong>
-        </article>
-        <article className="status-chip">
-          <span>Model</span>
-          <strong>{shortModelName(settings.model_name)}</strong>
-        </article>
-        <article className="status-chip">
-          <span>STT</span>
-          <strong>{fileNameFromPath(settings.whisper_model_path)}</strong>
-        </article>
-        <article className="status-chip">
-          <span>Session</span>
-          <strong>{sessionId ? sessionId.slice(0, 8) : "booting"}</strong>
-        </article>
-      </section>
-
-      <nav className="tabs">
-        <button className={activeTab === "chat" ? "active" : ""} onClick={() => switchTab("chat")}>Chat</button>
-        <button className={activeTab === "approvals" ? "active" : ""} onClick={() => switchTab("approvals")}>Approvals</button>
-        <button className={activeTab === "settings" ? "active" : ""} onClick={() => switchTab("settings")}>Settings</button>
-        <button className={activeTab === "smarthome" ? "active" : ""} onClick={() => switchTab("smarthome")}>Smart Home</button>
-      </nav>
-
-      <section className="tab-content">
+    <>
+      <AppShell
+        activeTab={activeTab}
+        onNavigate={switchTab}
+        onOpenCommands={() => setCommandPaletteOpen(true)}
+        runtime={{
+          voiceInput: voiceModeEnabled ? "Armed" : "Standby",
+          core: assistantMode,
+          uiRender: isTabPending ? "Switching" : "Stable",
+          replyMode: voiceRepliesEnabled ? "Voice + Text" : "Text Only",
+          model: shortModelName(settings.model_name),
+          stt: fileNameFromPath(settings.whisper_model_path),
+          session: sessionId ? sessionId.slice(0, 8) : "booting",
+          client: `${window.jarvisDesktop?.platform || "web"} · Electron ${window.jarvisDesktop?.versions.electron || "-"}`
+        }}
+      >
         {activeTab === "chat" ? renderChatTab() : null}
         {activeTab === "approvals" ? renderApprovalsTab() : null}
         {activeTab === "settings" ? renderSettingsTab() : null}
         {activeTab === "smarthome" ? renderSmartHomeTab() : null}
-      </section>
+      </AppShell>
 
       <CommandPalette
         open={commandPaletteOpen}
@@ -1964,7 +1916,7 @@ function App() {
         }}
         onRun={runCommandItem}
       />
-    </main>
+    </>
   );
 }
 
