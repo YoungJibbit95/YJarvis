@@ -1,0 +1,20 @@
+{
+  "open_url": {"model": "NoDataOutput", "data": {}},
+  "open_app": {"model": "NoDataOutput", "data": {}},
+  "raycast_open": {"model": "NoDataOutput", "data": {}},
+  "raycast_run_command": {"model": "NoDataOutput", "data": {}},
+  "clipboard_read": {"model": "ClipboardReadOutput", "data": {"text": "Clipboard\ntext"}},
+  "clipboard_write": {"model": "NoDataOutput", "data": {}},
+  "reminder_create": {"model": "NoDataOutput", "data": {}},
+  "reminder_list": {"model": "ReminderListOutput", "data": {"titles": ["Review", "Shopping"]}},
+  "calendar_create_event": {"model": "NoDataOutput", "data": {}},
+  "calendar_list_events": {"model": "CalendarListEventsOutput", "data": {"titles": ["Review", "Appointment"]}},
+  "notes_create": {"model": "NoDataOutput", "data": {}},
+  "notes_search": {"model": "NotesSearchOutput", "data": {"titles": ["Project notes"]}},
+  "mail_create_draft": {"model": "NoDataOutput", "data": {}},
+  "messages_send": {"model": "NoDataOutput", "data": {}},
+  "contacts_search": {"model": "ContactsSearchOutput", "data": {"names": ["Ada", "Grace"]}},
+  "music_control": {"model": "NoDataOutput", "data": {}},
+  "file_read": {"model": "FileReadOutput", "data": {"content": "File\ncontent"}},
+  "file_write": {"model": "NoDataOutput", "data": {}}
+}
