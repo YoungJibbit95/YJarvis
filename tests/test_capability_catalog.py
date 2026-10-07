@@ -1,10 +1,11 @@
 """The new descriptive inventory must not alter legacy identity or authority."""
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from jarvis_agent.domain.capability_catalog import LEGACY_TOOL_CATALOG
 from jarvis_agent.tools import ToolRegistry
@@ -49,7 +50,8 @@ def test_catalog_is_immutable_and_unknown_names_are_not_guessed():
 
 def test_deferred_metadata_does_not_pretend_to_be_an_available_typed_provider():
     for spec in LEGACY_TOOL_CATALOG.values():
-        assert spec.input_model is spec.output_model is None
+        assert isinstance(spec.input_model, type) and issubclass(spec.input_model, BaseModel)
+        assert spec.output_model is None
         assert spec.reversible is spec.supports_dry_run is False
         assert spec.timeout_seconds == 30
         assert spec.idempotent == (spec.mode == "read")
@@ -82,6 +84,24 @@ def test_registry_execution_and_planner_specs_remain_legacy(monkeypatch):
     asyncio.run(check())
     assert registry.list_specs() == before
     assert next(s for s in before if s["tool_name"] == "raycast_run_command")["risk_level"] == "medium"
+
+
+@pytest.mark.parametrize("payload, expected_text", [({"text": 123}, "123"), ({}, ""),
+                                                  ({"text": "ok", "extra": True}, "ok")])
+def test_real_legacy_tool_still_accepts_inputs_rejected_by_v2(monkeypatch, payload, expected_text):
+    from jarvis_agent.tools import system_tools
+
+    with pytest.raises(ValidationError):
+        LEGACY_TOOL_CATALOG["clipboard_write"].input_model.model_validate(payload)
+    command = AsyncMock(return_value=SimpleNamespace(returncode=0, stdout="", stderr=""))
+    monkeypatch.setattr(system_tools, "run_command", command)
+    # Real registry and tool, replacing only the native subprocess boundary.
+    registry = ToolRegistry()
+    specs = registry.list_specs()
+    result = asyncio.run(registry.execute("clipboard_write", payload, {}, {}))
+    assert result.success
+    command.assert_awaited_once_with(["pbcopy"], input_text=expected_text)
+    assert registry.list_specs() == specs
 
 
 @pytest.mark.parametrize("legacy_name", EXPECTED_MAPPING)

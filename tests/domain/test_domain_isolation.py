@@ -2,6 +2,7 @@
 
 import ast
 import importlib.util
+import json
 import subprocess
 import sys
 import textwrap
@@ -76,9 +77,16 @@ def run_domain_probe(tmp_path, side_effect=""):
         from jarvis_agent.domain import Action, ActionPlan, Observation, PlannedAction, PolicyDecision, Turn
         from jarvis_agent.domain import ToolSpecV2
         from jarvis_agent.domain.capability_catalog import LEGACY_TOOL_CATALOG
+        import json
+        inputs = json.loads(sys.argv[2])
         assert len(LEGACY_TOOL_CATALOG) == 18
-        for spec in LEGACY_TOOL_CATALOG.values():
+        assert inputs.keys() == LEGACY_TOOL_CATALOG.keys()
+        for name, spec in LEGACY_TOOL_CATALOG.items():
             assert ToolSpecV2.model_validate(spec.model_dump()) == spec
+            payload = spec.input_model.model_validate(inputs[name])
+            assert spec.input_model.model_validate(payload) == payload
+            assert spec.input_model.model_validate_json(payload.model_dump_json()) == payload
+            spec.input_model.model_json_schema()
         from uuid import UUID
         action = Action(id=UUID(int=1), capability="example.unregistered", arguments={"command": "never execute this"},
                         mode="system", risk="critical", reversible=False, requires_result=True)
@@ -103,7 +111,8 @@ def run_domain_probe(tmp_path, side_effect=""):
     workdir = tmp_path / "work"
     workdir.mkdir()
     result = subprocess.run(
-        [sys.executable, "-I", str(script), str(AGENT_PACKAGE.parent)],
+        [sys.executable, "-I", str(script), str(AGENT_PACKAGE.parent),
+         json.dumps(json.loads((ROOT / "tests" / "fixtures" / "tool_inputs.json").read_text(encoding="utf-8")))],
         cwd=workdir,
         capture_output=True,
         text=True,
