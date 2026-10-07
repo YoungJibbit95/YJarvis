@@ -74,6 +74,11 @@ def run_domain_probe(tmp_path, side_effect=""):
 
         sys.addaudithook(forbid_runtime_access)
         from jarvis_agent.domain import Action, ActionPlan, Observation, PlannedAction, PolicyDecision, Turn
+        from jarvis_agent.domain import ToolSpecV2
+        from jarvis_agent.domain.capability_catalog import LEGACY_TOOL_CATALOG
+        assert len(LEGACY_TOOL_CATALOG) == 18
+        for spec in LEGACY_TOOL_CATALOG.values():
+            assert ToolSpecV2.model_validate(spec.model_dump()) == spec
         from uuid import UUID
         action = Action(id=UUID(int=1), capability="example.unregistered", arguments={"command": "never execute this"},
                         mode="system", risk="critical", reversible=False, requires_result=True)

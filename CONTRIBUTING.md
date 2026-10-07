@@ -12,11 +12,12 @@ later subsystems early. Read the accepted
 Windows 11 x64 is the primary current target; macOS Apple Silicon stays first-class
 and Linux remains headless CI. Text/Core startup does not imply native tool/audio parity.
 
-YJ2-00 through YJ2-04B and YJW-00A/B are accepted. The current authorization is
-**YJW-00B.1 only**: stabilize external Ollama reuse detection, preserving external
-process ownership and remote fail-closed behavior.
-See the [recovery note](docs/architecture/ollama-reuse-reliability.md).
-Planner/router, tools, policy, providers, audio, UI and packaging remain out of scope.
+YJ2-00 through YJ2-04B and YJW-00A/B/B.1 are accepted. The current authorization is
+**YJ2-05A only**: descriptive semantic ToolSpec V2 contracts and an explicit legacy
+capability catalog, with no runtime behavior change.
+See the [semantic spec note](docs/architecture/semantic-tool-spec.md).
+Typed population/adapters (05B), ToolRuntime (05C), planner/router changes, policy,
+providers, file safety, audio, UI and packaging remain out of scope.
 Architectural violations require a documented decision and explicit approval,
 not an opportunistic refactor.
 
@@ -29,8 +30,8 @@ Never work directly on `main` or overwrite another contributor's work.
 For the current step:
 
 ```text
-Branch: yjv2/w00b1-ollama-reuse-reliability
-PR: [YJW-00B.1] Stabilize external Ollama reuse detection
+Branch: yjv2/05a-semantic-tool-spec
+PR: [YJ2-05A] Introduce semantic ToolSpec V2 contracts
 ```
 
 Use the PR template in full. Keep changes narrowly reviewable and reversible.
@@ -93,5 +94,5 @@ available checks are green, hand it to the user for external ChatGPT review
 against the actual diff and the architecture, then stop completely. No next
 branch, next PR, scaffold, or preparatory commit is allowed. CI success is not
 user approval. Only explicit user authorization after external review unlocks
-the next step. After YJW-00B.1, YJ2-05A, YJW-01 and audio work remain blocked until
-external review, an authorized merge, green main CI and explicit next-step approval.
+the next step. After YJ2-05A, typed population/adapters (05B), ToolRuntime (05C),
+YJW-01 and audio work remain blocked until explicit next-step approval after review.
