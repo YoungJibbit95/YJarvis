@@ -1,0 +1,20 @@
+{
+  "open_url": {"url": "https://example.test/path?q=value"},
+  "open_app": {"app_name": "Visual Studio Code"},
+  "raycast_open": {"fallback_text": "Project notes"},
+  "raycast_run_command": {"owner": "owner", "extension": "my-extension", "command": "open.v2", "fallback_text": "Project", "background": false},
+  "clipboard_read": {},
+  "clipboard_write": {"text": "Example\ntext"},
+  "reminder_create": {"title": "Review", "notes": "Check contracts", "due_at": "2026-10-08T10:00:00+02:00"},
+  "reminder_list": {"list_name": "Work", "limit": 8},
+  "calendar_create_event": {"title": "Review", "start_at": "2026-10-08T10:00:00", "start_offset_minutes": 5, "duration_minutes": 60},
+  "calendar_list_events": {"days_ahead": 7, "limit": 10},
+  "notes_create": {"title": "Project", "content": "First line\nSecond line", "folder": "Work"},
+  "notes_search": {"query": "Project", "folder": "Work", "limit": 8},
+  "mail_create_draft": {"subject": "Review", "content": "Hello", "recipient": "person@example.test"},
+  "messages_send": {"recipient": "+49123456789", "text": "Hello"},
+  "contacts_search": {"query": "Example", "limit": 6},
+  "music_control": {"action": "play"},
+  "file_read": {"path": "documents/example.txt"},
+  "file_write": {"path": "documents/example.txt", "content": "Example", "mode": "append"}
+}
