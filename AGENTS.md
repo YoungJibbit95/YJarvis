@@ -5,16 +5,16 @@ and `CONTRIBUTING.md` before editing. The architecture describes a migration tar
 not capabilities already present in the legacy application.
 
 - Work only on the roadmap step explicitly authorized by the user. YJ2-00 through
-  YJ2-03 and YJW-00A are accepted; the current authorized step is YJW-00B:
-  native Windows Text/Core startup. This is not permission for later steps.
+  YJ2-03 and YJW-00A/B are accepted; the current authorized step is YJ2-04A:
+  extract deterministic routing stages without changing behavior or priority.
 - Use one branch and one PR per step. Never work directly on `main`, stack an
   unreviewed step, merge your own migration PR, or enable auto-merge.
 - The user explicitly authorized Codex for implementation on 2026-10-07,
   superseding the historical agent/tooling restriction in the architecture source.
   Use direct GitHub operations and normal tools; no agent delegation is required.
-- For YJW-00B, change only development startup, Python discovery, Ollama reuse,
-  owned-process lifecycle and related tests/CI/docs. Preserve macOS support.
-  Do not begin tools, audio, file safety, packaging or YJ2-04.
+- For YJ2-04A, preserve safety, learning, German heuristics, planner fallback and
+  wire semantics. Deterministic stages return decisions, not lifecycle events.
+  Do not begin YJ2-04B, ToolSpec/ToolRuntime, policy, providers, UI/voice or packaging.
 - Read `docs/architecture/02_WINDOWS_CROSS_PLATFORM_ARCHITECTURE_ADDENDUM.md`.
   Core code stays OS-neutral; platform startup code belongs at the process boundary.
 - Keep each cycle small and independently reviewable, with exactly one releasable

@@ -1,6 +1,8 @@
 """Legacy routing characterization: priority collisions and German golden inputs."""
 
 import asyncio
+import ast
+import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -9,11 +11,9 @@ import pytest
 from jarvis_agent.db import Database
 from jarvis_agent.learning_engine import LearningEngine
 from jarvis_agent.orchestration import legacy_routing as routing_module
+from jarvis_agent.orchestration import routing_stages as stages_module
 from jarvis_agent.tool_intent import ToolCallIntent
 from jarvis_agent.tools import ToolRegistry
-
-# Before extraction the deterministic helpers live in the compatibility facade.
-stages_module = routing_module
 
 
 @pytest.fixture
@@ -187,3 +187,66 @@ def test_confirmation_state_and_event_timing_survive_later_failure(router, monke
     monkeypatch.setattr(router.learning, "handle_learning_instruction", fail_after_confirmation)
     with pytest.raises(RuntimeError, match="learning unavailable"):
         route(router, "Bestaetige", profile)
+
+
+@pytest.mark.parametrize("pending, message, restored, accepted", [
+    (False, "Bestaetige", "Bestaetige", False),
+    (True, "Bestaetige", "oeffne Safari", True),
+    (True, "hallo jarvis", "hallo jarvis", False),
+])
+def test_safety_stage_returns_confirmation_metadata_without_lifecycle_dependencies(pending, message, restored, accepted):
+    safety = stages_module.LegacySafetyStage()
+    profile = {"safety": {"confirmation_required_patterns": ["Safari"]}}
+    if pending:
+        initial = safety.resolve_confirmation("session", "oeffne Safari", profile)
+        assert safety.check("session", initial, profile).detail == "Sicherheitsbestaetigung erforderlich"
+    safety.pending_confirmations["other"] = {"original_message": "untouched"}
+    result = safety.resolve_confirmation("session", message, profile)
+    assert result == stages_module.ConfirmationResolution(restored, accepted)
+    assert safety.pending_confirmations == {"other": {"original_message": "untouched"}}
+    assert safety.check("session", result, profile) is None
+
+
+def test_confirmation_never_bypasses_hard_block_and_event_precedes_check(router, monkeypatch):
+    router.routing.pending_confirmations["session"] = {"original_message": "oeffne Safari"}
+
+    def block(message, profile):
+        assert message == "oeffne Safari"
+        router.responses.emit_state.assert_awaited_once()
+        return "new hard block"
+    monkeypatch.setattr(stages_module, "detect_blocked_user_request", block)
+    assert route(router, "Bestaetige").detail == "Sicherheitsregel hat Anfrage blockiert"
+    router.planner.assert_not_awaited()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_unregistered_heuristic_reaches_only_enabled_legacy_planner(router, enabled):
+    router.routing.enable_tool_planner = enabled
+    result = route(router, '/tool unknown {"value":1}')
+    # /tool alone is not a legacy tool-request hint; use an argument containing one.
+    assert result.intent is None
+    router.planner.assert_not_awaited()
+    result = route(router, '/tool unknown {"value":"oeffne"}')
+    assert router.planner.await_count == int(enabled)
+    if enabled:
+        assert result.intent == ToolCallIntent("open_app", {"app_name": "Notes"}, "planner")
+    else:
+        assert result.detail == "Tool-Aufruf unklar, keine Ausfuehrung"
+
+
+def test_learn_action_retains_existing_planner_callback(router):
+    result = route(router, '/learn "fokus" => mach xyz')
+    assert result.detail == "Lernmodus aktualisiert"
+    router.planner.assert_awaited_once()
+    assert router.planner.call_args.kwargs["user_message"] == "mach xyz"
+    assert route(router, "fokus").intent.tool_input == {"app_name": "Notes"}
+    assert router.planner.await_count == 1
+
+
+def test_stage_module_has_no_lifecycle_model_or_platform_imports():
+    tree = ast.parse(inspect.getsource(stages_module))
+    imports = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+    imports |= {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
+    assert not imports & {"events", "legacy_responses", "turn_engine", "llm", "os", "sys", "subprocess"}
+    assert not any(isinstance(node, ast.Attribute) and node.attr in {"emit_state", "publish", "stream_response"}
+                   for node in ast.walk(tree))

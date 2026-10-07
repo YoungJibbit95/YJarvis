@@ -56,3 +56,12 @@ PR #6 was externally accepted and squash-merged as `495a6c6`. All six main check
 passed before starting [YJW-00B: native Windows Text/Core startup](windows-core-startup.md).
 Only startup, Python discovery, Ollama reuse and owned-process lifecycle are in
 scope. Tools, audio, file safety, packaging, YJW-01 and YJ2-04 remain unauthorized.
+
+## YJ2-04A authorization after YJW-00B review
+
+PR #7 was externally accepted and squash-merged as `399ce0b`. All six checks in
+[the main CI run](https://github.com/YoungJibbit95/YJarvis/actions/runs/37664580701)
+passed, and main HEAD was re-read before creating the YJ2-04A branch. The user
+split YJ2-04 and authorized only [deterministic routing extraction](deterministic-routing-stages.md).
+Planner isolation (YJ2-04B), ToolSpec/ToolRuntime (YJ2-05), policy (YJ2-06) and
+Windows providers (YJW-01) remain behind the external-review gate.
