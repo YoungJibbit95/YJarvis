@@ -7,6 +7,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 AGENT_PACKAGE = ROOT / "apps" / "agent" / "jarvis_agent"
@@ -51,7 +53,7 @@ def test_legacy_runtime_has_no_domain_imports_yet():
             assert not any(name == "jarvis_agent.domain" or name.startswith("jarvis_agent.domain.") for name in names), path
 
 
-def test_import_and_validation_do_not_access_runtime_services(tmp_path):
+def run_domain_probe(tmp_path, side_effect=""):
     program = textwrap.dedent(
         """
         import os
@@ -85,17 +87,50 @@ def test_import_and_validation_do_not_access_runtime_services(tmp_path):
         unexpected = [name for name in sys.modules if name.startswith("jarvis_agent.")
                       and name != "jarvis_agent.domain" and not name.startswith("jarvis_agent.domain.")]
         assert not unexpected, unexpected
-        print("isolated-domain-ok")
         """
     )
+    program += "\n" + side_effect + '\nprint("isolated-domain-ok")\n'
+    # A real script avoids the Windows/Python 3.11.1 audit/import failure seen
+    # with -c, even with a no-op hook. Keep -I and install the full audit guard
+    # before importing the domain; do not preload the modules under test.
+    script = tmp_path / "domain_probe.py"
+    script.write_text(program, encoding="utf-8")
+    workdir = tmp_path / "work"
+    workdir.mkdir()
     result = subprocess.run(
-        [sys.executable, "-I", "-c", program, str(AGENT_PACKAGE.parent)],
-        cwd=tmp_path,
+        [sys.executable, "-I", str(script), str(AGENT_PACKAGE.parent)],
+        cwd=workdir,
         capture_output=True,
         text=True,
         timeout=20,
         check=False,
     )
+    assert not list(workdir.iterdir())
+    assert set(tmp_path.iterdir()) == {script, workdir}
+    assert script.read_text(encoding="utf-8") == program
+    return result
+
+
+def test_import_and_validation_do_not_access_runtime_services(tmp_path):
+    result = run_domain_probe(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "isolated-domain-ok"
-    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("side_effect, expected", [
+    ('open("forbidden.txt", "w")', "Unexpected file write"),
+    ('os.open("forbidden.txt", os.O_WRONLY | os.O_CREAT)', "Unexpected file write"),
+    ('import subprocess; subprocess.run([sys.executable, "-c", "pass"], check=True)',
+     "Unexpected side effect: subprocess.Popen"),
+    ('import socket; socket.socket().bind(("127.0.0.1", 0))',
+     "Unexpected side effect: socket.bind"),
+    ('import socket; socket.socket().connect(("127.0.0.1", 9))',
+     "Unexpected side effect: socket.connect"),
+    ('import sqlite3; sqlite3.connect(":memory:")',
+     "Unexpected side effect: sqlite3.connect"),
+])
+def test_domain_probe_rejects_actual_io_attempts(tmp_path, side_effect, expected):
+    result = run_domain_probe(tmp_path, side_effect)
+    assert result.returncode != 0
+    assert "AssertionError: " + expected in result.stderr, result.stdout + result.stderr
+    assert "isolated-domain-ok" not in result.stdout

@@ -116,3 +116,81 @@ jobs:
         run: |
           test -s apps/desktop/dist/index.html
           git diff --exit-code -- package.json package-lock.json apps/desktop/package.json packages/shared-types/package.json
+
+  windows-python-tests:
+    name: windows-python-tests
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: |
+            apps/agent/requirements.txt
+            requirements-dev.txt
+      - name: Install runtime and development dependencies
+        run: python -m pip install -r apps/agent/requirements.txt -r requirements-dev.txt
+      - name: Record Windows and Python environment
+        run: |
+          [System.Environment]::OSVersion.VersionString
+          git rev-parse HEAD
+          python --version
+          python -m pip --version
+          python -m pip freeze
+      - name: Validate dependencies
+        run: python -m pip check
+      - name: Run the complete Python test suite
+        run: python -m pytest -q
+
+  windows-desktop-checks:
+    name: windows-desktop-checks
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # Static checks only; this job does not launch or package Electron.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install the committed dependency graph
+        run: npm ci
+      - name: Record Node and npm versions
+        run: |
+          node --version
+          npm --version
+      # Keep native checks in separate steps so a later success cannot mask
+      # an earlier nonzero exit code in PowerShell.
+      - name: Typecheck the renderer and its shared types
+        run: npm run typecheck
+      - name: Syntax-check Electron main
+        run: node --check apps/desktop/electron/main.cjs
+      - name: Syntax-check Electron preload
+        run: node --check apps/desktop/electron/preload.cjs
+      - name: Build the existing Vite renderer
+        run: npm run build
+      - name: Verify build output
+        run: |
+          if (!(Test-Path -LiteralPath 'apps/desktop/dist/index.html' -PathType Leaf)) {
+            throw 'Renderer build output is missing'
+          }
+          if ((Get-Item -LiteralPath 'apps/desktop/dist/index.html').Length -eq 0) {
+            throw 'Renderer build output is empty'
+          }
+      - name: Verify unchanged dependency manifests
+        run: git diff --exit-code -- package.json package-lock.json apps/desktop/package.json packages/shared-types/package.json

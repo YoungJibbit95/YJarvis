@@ -2,11 +2,14 @@
 
 ## What this baseline covers
 
-YJ2-00 adds CI and review guardrails; the application remains the existing V1
-runtime. The target is macOS on Apple Silicon. Automated baseline checks run on
-Ubuntu 24.04 with Python **3.11.x** (`.python-version`) and Node.js **22.x**
-(`.nvmrc`). Patch versions may advance within these lines and are logged by CI.
-No broader Python/Node support matrix or minimum macOS release is claimed here.
+YJ2-00 added CI and review guardrails; YJ2-01 through YJ2-03 added inert domain
+contracts, migration infrastructure and an orchestration extraction. YJW-00A
+adds a native Windows automated baseline. Windows 11 x64 is the primary current
+development target; macOS Apple Silicon remains first-class, with the existing
+macOS runtime setup below. Automated checks run on Ubuntu 24.04 and the x64
+`windows-2025` runner with Python **3.11.x** (`.python-version`) and Node.js **22.x**
+(`.nvmrc`). Patch versions are logged by CI. This does not claim Windows desktop
+startup or broader Python/Node support.
 
 The committed npm lockfile supplies the JavaScript dependency graph. Python
 runtime dependencies are pinned directly in both `apps/agent/requirements.txt`
@@ -14,6 +17,39 @@ and `apps/agent/pyproject.toml`; they are intentionally unchanged by YJ2-00.
 Transitive Python dependencies are not fully locked: CI records `pip freeze` and
 runs `pip check` so the resolved environment can be inspected. Development-only
 `pytest` and Ruff versions are pinned in `requirements-dev.txt`.
+That file also pins `tzdata` on Windows for the DST contract test; production code
+currently does not construct IANA `ZoneInfo` objects. Runtime manifests are unchanged.
+
+## Native Windows automated checks (YJW-00A)
+
+With Python 3.11 and Node 22 installed, run from the repository root in PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r apps/agent/requirements.txt -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m ruff check apps/agent/jarvis_agent tests
+node --version
+npm --version
+npm ci
+npm run typecheck
+node --check apps/desktop/electron/main.cjs
+node --check apps/desktop/electron/preload.cjs
+npm run build
+```
+
+Run each check and inspect its exit status; do not mask an earlier failure with a
+later command. Direct interpreter paths avoid activation/execution-policy changes.
+No WSL, Git Bash, model server or audio device is needed. Windows wheels supply
+the libraries needed to import the existing audio dependencies during these tests.
+CI skips downloading Electron's binary for static checks; normal installs do not.
+
+These commands test the platform-neutral core and static desktop code. The root
+`npm run dev`, managed backend discovery and native tool/audio providers are still
+legacy runtime paths and are **not** made Windows-ready by YJW-00A. See the
+[Windows baseline note](architecture/windows-test-ci-baseline.md) for the three
+test fixes, retained assertions and verification limits.
 
 ## 1. macOS prerequisites
 
@@ -161,11 +197,15 @@ application or launch Electron.
 
 ## 6. CI and review evidence
 
-`.github/workflows/ci.yml` provides four independent, blocking-on-failure jobs:
-`python-tests`, `python-lint`, `desktop-typecheck`, and `desktop-build`.
+`.github/workflows/ci.yml` retains four Ubuntu jobs: `python-tests`, `python-lint`,
+`desktop-typecheck`, and `desktop-build`, and adds `windows-python-tests` plus
+`windows-desktop-checks`. All six fail on check failures.
 They run for every PR targeting `main`, for pushes to `main`, and manual dispatch.
 No path filters or `continue-on-error` hide failures. Actions are SHA-pinned,
 checkout credentials are not persisted, and workflow permissions are read-only.
+Windows jobs use native PowerShell and separate validation steps so a later
+command cannot mask an earlier nonzero exit code. Both OS jobs run the complete
+Python suite; no Windows-only skips, deselection or xfails were introduced.
 
 A successful job proves only its actual commands. Inspect the final PR head's
 check results and logs; never infer a pass from a workflow file existing. Consult

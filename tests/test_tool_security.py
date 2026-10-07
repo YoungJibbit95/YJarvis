@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from jarvis_agent.tools.security import is_path_allowed, resolve_path
@@ -18,7 +19,8 @@ def test_path_outside_allowlist_is_blocked(tmp_path: Path):
 
 
 def test_resolve_path_expands_home(monkeypatch, tmp_path: Path):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    # expanduser uses USERPROFILE on Windows and HOME on POSIX.
+    monkeypatch.setenv("USERPROFILE" if os.name == "nt" else "HOME", str(tmp_path))
     resolved = resolve_path("~/abc")
 
-    assert str(resolved).startswith(str(tmp_path))
+    assert resolved == (tmp_path / "abc").resolve()

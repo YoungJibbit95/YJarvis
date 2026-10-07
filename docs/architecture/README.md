@@ -42,3 +42,10 @@ unchanged, including its historical browser-agent wording.
 
 YJW-00 is the proposed next step after YJ2-03 external acceptance and explicit
 user authorization. No next-step implementation is included here.
+
+## YJW-00A authorization after YJ2-03 review
+
+YJ2-03 was externally accepted and PR #5 squash-merged as `65490d2`. Its complete
+main CI passed before YJW-00A began. The user split Windows bootstrap into small
+PRs and authorized only [YJW-00A: Windows test/CI baseline](windows-test-ci-baseline.md).
+Runtime startup (YJW-00B or later) and YJ2-04 remain behind the external-review gate.
