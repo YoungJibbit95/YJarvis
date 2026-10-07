@@ -12,10 +12,11 @@ later subsystems early. Read the accepted
 Windows 11 x64 is the primary current target; macOS Apple Silicon stays first-class
 and Linux remains headless CI. Text/Core startup does not imply native tool/audio parity.
 
-YJ2-00 through YJ2-03 and YJW-00A are accepted. The current authorization is
-**YJW-00B only**: native Windows Text/Core startup through a shared Node launcher,
-Python discovery, Ollama reuse and owned-process cleanup. Preserve macOS behavior.
-Providers, file safety, audio, packaging and YJ2-04 remain out of scope.
+YJ2-00 through YJ2-03 and YJW-00A/B are accepted. The current authorization is
+**YJ2-04A only**: extract deterministic routing stages, preserving the exact
+legacy precedence, safety, learning, heuristics, planner fallback and wire semantics.
+See the [routing note](docs/architecture/deterministic-routing-stages.md).
+YJ2-04B, tools, policy, providers, audio, UI and packaging remain out of scope.
 Architectural violations require a documented decision and explicit approval,
 not an opportunistic refactor.
 
@@ -28,8 +29,8 @@ Never work directly on `main` or overwrite another contributor's work.
 For the current step:
 
 ```text
-Branch: yjv2/w00b-windows-core-startup
-PR: [YJW-00B] Enable native Windows core startup
+Branch: yjv2/04a-deterministic-routing
+PR: [YJ2-04A] Extract deterministic routing stages
 ```
 
 Use the PR template in full. Keep changes narrowly reviewable and reversible.
@@ -92,5 +93,5 @@ available checks are green, hand it to the user for external ChatGPT review
 against the actual diff and the architecture, then stop completely. No next
 branch, next PR, scaffold, or preparatory commit is allowed. CI success is not
 user approval. Only explicit user authorization after external review unlocks
-the next step. After YJW-00B, YJW-01, YJ2-04 and audio work remain blocked until
+the next step. After YJ2-04A, YJ2-04B, YJ2-05, YJW-01 and audio work remain blocked until
 the user explicitly authorizes one next step following external review.
