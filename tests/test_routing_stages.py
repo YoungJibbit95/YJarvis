@@ -10,6 +10,7 @@ import pytest
 
 from jarvis_agent.db import Database
 from jarvis_agent.learning_engine import LearningEngine
+from jarvis_agent.orchestration import legacy_planner as planner_module
 from jarvis_agent.orchestration import legacy_routing as routing_module
 from jarvis_agent.orchestration import routing_stages as stages_module
 from jarvis_agent.tool_intent import ToolCallIntent
@@ -26,7 +27,7 @@ def router(tmp_path, monkeypatch):
     planner = AsyncMock(return_value={
         "tool_name": "open_app", "tool_input": {"app_name": "Notes"}, "reason": "planner",
     })
-    monkeypatch.setattr(routing_module, "plan_tool_call", planner)
+    monkeypatch.setattr(planner_module, "plan_tool_call", planner)
     routing = routing_module.LegacyRouting(tools, learning, responses, enable_tool_planner=True)
     return SimpleNamespace(db=db, routing=routing, learning=learning, responses=responses, planner=planner)
 
@@ -158,7 +159,7 @@ def test_adaptive_routing_preserves_arguments_and_source_trigger(router, learned
 
 @pytest.mark.parametrize("enabled", [False, True])
 def test_planner_failure_clarifies_tool_request_but_conversation_does_not_plan(router, enabled):
-    router.routing.enable_tool_planner = enabled
+    router.routing.planner.enable_tool_planner = enabled
     router.planner.return_value = None
     unclear = route(router, "mach xyz")
     assert unclear.detail == "Tool-Aufruf unklar, keine Ausfuehrung"
@@ -221,7 +222,7 @@ def test_confirmation_never_bypasses_hard_block_and_event_precedes_check(router,
 
 @pytest.mark.parametrize("enabled", [False, True])
 def test_unregistered_heuristic_reaches_only_enabled_legacy_planner(router, enabled):
-    router.routing.enable_tool_planner = enabled
+    router.routing.planner.enable_tool_planner = enabled
     result = route(router, '/tool unknown {"value":1}')
     # /tool alone is not a legacy tool-request hint; use an argument containing one.
     assert result.intent is None

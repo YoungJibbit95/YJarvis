@@ -1,12 +1,15 @@
 """Characterize the existing planner boundary before and after extraction."""
 
 import asyncio
+import ast
+import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from jarvis_agent.orchestration import legacy_routing as planner_module
+from jarvis_agent.orchestration import legacy_planner as planner_module
+from jarvis_agent.orchestration import legacy_routing, routing_stages
 from jarvis_agent.tool_intent import ToolCallIntent
 from jarvis_agent.tools import ToolRegistry
 from test_turn_lifecycle import rig  # Reuse the real SQLite/lifecycle fixture.
@@ -19,14 +22,13 @@ def planner(monkeypatch):
     specs = tools.list_specs()
     ranked = list(reversed(specs))
     learning = SimpleNamespace(
-        resolve_learned_command_intent=AsyncMock(return_value=None),
         rank_tool_specs_for_planner=AsyncMock(return_value=ranked),
         apply_adaptive_routing=AsyncMock(side_effect=lambda intent: intent),
     )
     call = AsyncMock(return_value={"tool_name": "open_app", "tool_input": {"app_name": "Safari"}})
     monkeypatch.setattr(planner_module, "plan_tool_call", call)
-    adapter = planner_module.LegacyRouting(tools, learning, None, enable_tool_planner=True)
-    return SimpleNamespace(plan=adapter._decide_tool_intent, adapter=adapter, tools=tools,
+    adapter = planner_module.LegacyPlannerAdapter(tools, learning, enable_tool_planner=True)
+    return SimpleNamespace(plan=adapter.plan, adapter=adapter, tools=tools,
                            learning=learning, call=call, specs=specs, ranked=ranked)
 
 
@@ -97,8 +99,11 @@ def test_model_cancellation_propagates(planner):
 
 
 @pytest.mark.parametrize("learned", [False, True])
-def test_deterministic_intent_wins_before_model_call(rig, learned):
+def test_deterministic_intent_wins_before_model_call(rig, learned, monkeypatch):
     rig.service = rig.enable("JARVIS_ENABLE_TOOL_PLANNER")
+    adapter = rig.service.turn_engine.routing.planner
+    plan = AsyncMock(wraps=adapter.plan)
+    monkeypatch.setattr(adapter, "plan", plan)
 
     async def check():
         if learned:
@@ -110,6 +115,7 @@ def test_deterministic_intent_wins_before_model_call(rig, learned):
         assert approval["tool_name"] == "open_app"
         assert approval["tool_input"] == {"app_name": "Notes" if learned else "Safari"}
         rig.planner.assert_not_awaited()
+        plan.assert_not_awaited()
         rig.tools.execute.assert_not_awaited()
     asyncio.run(check())
 
@@ -172,3 +178,21 @@ def test_learn_planner_resolution_does_not_recurse_or_replan_trigger(rig, enable
             assert stored is None
         rig.tools.execute.assert_not_awaited()
     asyncio.run(check())
+
+
+@pytest.mark.parametrize("module", [legacy_routing, routing_stages, planner_module])
+def test_planner_boundary_has_no_lifecycle_execution_or_os_responsibility(module):
+    tree = ast.parse(inspect.getsource(module))
+    imported = {part for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+                for part in (node.module or "").split(".")}
+    imported |= {part for node in ast.walk(tree) if isinstance(node, ast.Import)
+                 for alias in node.names for part in alias.name.split(".")}
+    assert not imported & {"os", "sys", "subprocess", "platform"}
+    if module is not planner_module:
+        assert "llm" not in imported
+        assert not any(isinstance(node, ast.Name) and node.id == "plan_tool_call" for node in ast.walk(tree))
+    else:
+        assert not imported & {"events", "legacy_responses", "turn_engine", "domain"}
+        assert not any(isinstance(node, ast.Attribute) and node.attr in
+                       {"emit_state", "publish", "execute", "create_approval", "stream_response"}
+                       for node in ast.walk(tree))
