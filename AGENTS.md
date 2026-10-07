@@ -4,13 +4,21 @@ Read `docs/architecture/YJarvis_V2_Architecture_and_Browser_Agent_Master_Prompt.
 and `CONTRIBUTING.md` before editing. The architecture describes a migration target,
 not capabilities already present in the legacy application.
 
-- Work only on the roadmap step explicitly authorized by the user. The initial
-  authorized step is YJ2-00: baseline CI and architecture guardrails.
+- Work only on the roadmap step explicitly authorized by the user. YJ2-00 through
+  YJ2-02 are accepted; the current authorized step is YJ2-03: extract the TurnEngine
+  shell without product behavior changes. This is not permission for later steps.
 - Use one branch and one PR per step. Never work directly on `main`, stack an
   unreviewed step, merge your own migration PR, or enable auto-merge.
-- Do not use or delegate to Codex. Use direct GitHub operations and normal tools.
-- For YJ2-00, do not change runtime behavior, approvals, tools, voice, persistence,
-  planning, memory, routines, or the UI. Do not scaffold YJ2-01 or later modules.
+- The user explicitly authorized Codex for implementation on 2026-10-07,
+  superseding the historical agent/tooling restriction in the architecture source.
+  Use direct GitHub operations and normal tools; no agent delegation is required.
+- For YJ2-03, preserve runtime behavior, approvals, tools, voice, persistence,
+  planning, memory, routines, APIs and the UI. Do not implement later steps.
+- Read `docs/architecture/02_WINDOWS_CROSS_PLATFORM_ARCHITECTURE_ADDENDUM.md`.
+  New orchestration must be OS-neutral; the Windows runtime port is out of scope.
+- Keep each cycle small and independently reviewable, with exactly one releasable
+  goal. If the scope needs deep changes across multiple subsystems, stop and split
+  the proposed work before proceeding. No WIP PRs or unnecessary future scaffolds.
 - Read the actual current branch and compare it with the documented baseline;
   never overwrite concurrent user changes or force-push without an explicit need.
 - Run the documented tests and build. Report commands and actual results. Never

@@ -5,13 +5,18 @@
 User instructions take precedence, followed by the supplied
 [V2 architecture](docs/architecture/YJarvis_V2_Architecture_and_Browser_Agent_Master_Prompt.md),
 the explicitly approved roadmap step, and existing repository conventions.
-The numbered roadmap and master prompt define the step order. The architecture is
-a target; it is not a reason to implement later subsystems early.
+The numbered roadmap and master prompt define the step order, subject to explicit
+user decisions. The architecture is a target; it is not a reason to implement
+later subsystems early. Read the accepted
+[Windows/cross-platform addendum](docs/architecture/02_WINDOWS_CROSS_PLATFORM_ARCHITECTURE_ADDENDUM.md).
+Windows 11 x64 is the primary current target; macOS Apple Silicon stays first-class
+and Linux remains headless CI. This does not claim Windows runtime support yet.
 
-YJ2-00 establishes development checks and documentation only. It must not change
-`AgentService`, approvals, tools, voice, persistence, planning, memory, routines,
-or the user interface. Architectural violations require a documented decision
-and explicit approval, not an opportunistic refactor.
+YJ2-00 through YJ2-02 are accepted. The current authorization is **YJ2-03 only**:
+extract a TurnEngine orchestration shell without changing product behavior.
+Approvals, APIs, persistence, tools, voice and the UI retain their semantics.
+Architectural violations require a documented decision and explicit approval,
+not an opportunistic refactor.
 
 ## One step, one branch, one pull request
 
@@ -19,17 +24,24 @@ Start from the inspected current `main`, compare it with the architecture baseli
 `dea0e9e6a266584e9c8efaf53dd82138aecbd662`, and explain any intervening changes.
 Never work directly on `main` or overwrite another contributor's work.
 
-For the first step:
+For the current step:
 
 ```text
-Branch: yjv2/00-baseline-ci
-PR: [YJ2-00] Establish baseline CI and architecture guardrails
+Branch: yjv2/03-turn-engine-shell
+PR: [YJ2-03] Extract TurnEngine orchestration shell
 ```
 
 Use the PR template in full. Keep changes narrowly reviewable and reversible.
 Do not introduce new runtime dependencies unless the approved step needs them.
 Never commit `.env`, credentials, model files, personal databases, or generated
-build output. This workflow does not use Codex.
+build output. On 2026-10-07 the user explicitly authorized Codex implementation,
+superseding only the historical agent/tooling restriction. Preserve the original
+architecture source and all scope, evidence, safety and external-review gates.
+
+Each cycle has one small, complete, independently testable and reversible goal.
+Avoid WIP or aggregate PRs; split oversized proposed work before implementation.
+Run focused checks and the complete existing suite/build, inspect the final diff,
+remove unnecessary changes, open one PR, check CI, finish the handoff and stop.
 
 ## Checks and evidence
 
@@ -72,9 +84,10 @@ require these four checks and review before merging; until then, these are
 workflow and review conventions, not a server-enforced merge barrier. Do not
 claim enforcement merely because a PR template or workflow exists.
 
-A browser implementer must not merge the PR or enable auto-merge. After all
+The implementer must not merge the PR or enable auto-merge. After all
 available checks are green, hand it to the user for external ChatGPT review
 against the actual diff and the architecture, then stop completely. No next
 branch, next PR, scaffold, or preparatory commit is allowed. CI success is not
 user approval. Only explicit user authorization after external review unlocks
-the next numbered step.
+the next step. After YJ2-03, the revised proposed next step is YJW-00 (Windows
+bootstrap and CI baseline), not YJ2-04. Neither is authorized by this document.
