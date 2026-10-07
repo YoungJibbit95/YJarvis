@@ -124,7 +124,14 @@ async function healthy(url) {
 
 async function ensureOllama(owner, env = process.env, probe = healthy) {
   const url = ollamaUrl(env);
-  if (await probe(new URL("/api/tags", url))) return null;
+  // A cold fetch or a scheduling delay can consume one probe's timeout even
+  // when the endpoint is listening. Confirm failure once before deciding to spawn.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (owner.stopped) throw new Error("Startup cancelled");
+    const ready = await probe(new URL("/api/tags", url));
+    if (owner.stopped) throw new Error("Startup cancelled");
+    if (ready) return null;
+  }
   if (!["127.0.0.1", "localhost", "[::1]", "0.0.0.0"].includes(url.hostname)) {
     throw new Error(`External Ollama endpoint is unavailable: ${url.origin}`);
   }
