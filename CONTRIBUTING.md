@@ -12,9 +12,10 @@ later subsystems early. Read the accepted
 Windows 11 x64 is the primary current target; macOS Apple Silicon stays first-class
 and Linux remains headless CI. This does not claim Windows runtime support yet.
 
-YJ2-00 through YJ2-02 are accepted. The current authorization is **YJ2-03 only**:
-extract a TurnEngine orchestration shell without changing product behavior.
-Approvals, APIs, persistence, tools, voice and the UI retain their semantics.
+YJ2-00 through YJ2-03 are accepted. The current authorization is **YJW-00A only**:
+establish Windows test and CI coverage without changing product behavior.
+Keep all isolation/security assertions; no Windows skips or xfails to hide failures.
+Runtime launchers, providers, file safety, audio and YJ2-04 remain out of scope.
 Architectural violations require a documented decision and explicit approval,
 not an opportunistic refactor.
 
@@ -27,8 +28,8 @@ Never work directly on `main` or overwrite another contributor's work.
 For the current step:
 
 ```text
-Branch: yjv2/03-turn-engine-shell
-PR: [YJ2-03] Extract TurnEngine orchestration shell
+Branch: yjv2/w00a-windows-ci-baseline
+PR: [YJW-00A] Establish Windows test and CI baseline
 ```
 
 Use the PR template in full. Keep changes narrowly reviewable and reversible.
@@ -74,13 +75,14 @@ nonblocking out-of-scope observations in the PR; fix only blockers within the
 approved scope.
 
 The required check names are `python-tests`, `python-lint`, `desktop-typecheck`,
-and `desktop-build`. The workflow runs on every PR targeting `main`, on pushes to
-`main`, and through manual dispatch, without path filters.
+`desktop-build`, `windows-python-tests`, and `windows-desktop-checks`. The workflow
+runs on every PR targeting `main`, on pushes to `main` and migration branches,
+and through manual dispatch, without path filters.
 
 Repository files do **not** activate GitHub branch protection. At baseline,
 `main` reported `protected: false` and no required status-check contexts. A
 repository administrator should configure protection/rulesets separately to
-require these four checks and review before merging; until then, these are
+require these six checks and review before merging; until then, these are
 workflow and review conventions, not a server-enforced merge barrier. Do not
 claim enforcement merely because a PR template or workflow exists.
 
@@ -89,5 +91,6 @@ available checks are green, hand it to the user for external ChatGPT review
 against the actual diff and the architecture, then stop completely. No next
 branch, next PR, scaffold, or preparatory commit is allowed. CI success is not
 user approval. Only explicit user authorization after external review unlocks
-the next step. After YJ2-03, the revised proposed next step is YJW-00 (Windows
-bootstrap and CI baseline), not YJ2-04. Neither is authorized by this document.
+the next step. Windows bootstrap is split into small PRs: YJW-00A establishes
+the automated baseline; YJW-00B or later may address runtime startup. Neither
+YJW-00B nor YJ2-04 is authorized by this document.

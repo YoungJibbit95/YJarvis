@@ -1,6 +1,6 @@
 ## Goal
 
-<!-- Name the single approved YJ2 step and its acceptance criteria. -->
+<!-- Name the single approved YJarvis step and its acceptance criteria. -->
 
 ## Scope
 
@@ -28,8 +28,8 @@
 
 ## GitHub checks
 
-<!-- Links and actual results for python-tests, python-lint,
-     desktop-typecheck, and desktop-build at the final PR head. -->
+<!-- Links and actual results for python-tests, python-lint, desktop-typecheck,
+     desktop-build, windows-python-tests, and windows-desktop-checks at the final PR head. -->
 
 ## Manual verification
 

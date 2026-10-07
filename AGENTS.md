@@ -5,17 +5,18 @@ and `CONTRIBUTING.md` before editing. The architecture describes a migration tar
 not capabilities already present in the legacy application.
 
 - Work only on the roadmap step explicitly authorized by the user. YJ2-00 through
-  YJ2-02 are accepted; the current authorized step is YJ2-03: extract the TurnEngine
-  shell without product behavior changes. This is not permission for later steps.
+  YJ2-03 are accepted; the current authorized step is YJW-00A: establish a clean
+  Windows test and CI baseline. This is not permission for later steps.
 - Use one branch and one PR per step. Never work directly on `main`, stack an
   unreviewed step, merge your own migration PR, or enable auto-merge.
 - The user explicitly authorized Codex for implementation on 2026-10-07,
   superseding the historical agent/tooling restriction in the architecture source.
   Use direct GitHub operations and normal tools; no agent delegation is required.
-- For YJ2-03, preserve runtime behavior, approvals, tools, voice, persistence,
-  planning, memory, routines, APIs and the UI. Do not implement later steps.
+- For YJW-00A, change only tests, test dependencies, CI and related documentation.
+  Preserve runtime behavior and isolation/security assertions. Do not hide test
+  failures with skips/xfails or begin runtime, tool, audio or file-safety ports.
 - Read `docs/architecture/02_WINDOWS_CROSS_PLATFORM_ARCHITECTURE_ADDENDUM.md`.
-  New orchestration must be OS-neutral; the Windows runtime port is out of scope.
+  New core code must be OS-neutral; the Windows runtime port is out of scope.
 - Keep each cycle small and independently reviewable, with exactly one releasable
   goal. If the scope needs deep changes across multiple subsystems, stop and split
   the proposed work before proceeding. No WIP PRs or unnecessary future scaffolds.
