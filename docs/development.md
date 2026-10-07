@@ -8,8 +8,8 @@ adds a native Windows automated baseline. Windows 11 x64 is the primary current
 development target; macOS Apple Silicon remains first-class, with the existing
 macOS runtime setup below. Automated checks run on Ubuntu 24.04 and the x64
 `windows-2025` runner with Python **3.11.x** (`.python-version`) and Node.js **22.x**
-(`.nvmrc`). Patch versions are logged by CI. This does not claim Windows desktop
-startup or broader Python/Node support.
+(`.nvmrc`). YJW-00B adds shared native Windows/macOS Text/Core startup. Patch
+versions are logged by CI; native tools/audio and packaging remain separate work.
 
 The committed npm lockfile supplies the JavaScript dependency graph. Python
 runtime dependencies are pinned directly in both `apps/agent/requirements.txt`
@@ -30,6 +30,7 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip check
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m ruff check apps/agent/jarvis_agent tests
+npm run test:startup
 node --version
 npm --version
 npm ci
@@ -45,11 +46,78 @@ No WSL, Git Bash, model server or audio device is needed. Windows wheels supply
 the libraries needed to import the existing audio dependencies during these tests.
 CI skips downloading Electron's binary for static checks; normal installs do not.
 
-These commands test the platform-neutral core and static desktop code. The root
-`npm run dev`, managed backend discovery and native tool/audio providers are still
-legacy runtime paths and are **not** made Windows-ready by YJW-00A. See the
+These commands test the core, real backend startup/cleanup and static desktop code.
+No models or GUI are needed for `test:startup`; it uses disposable SQLite databases.
+Native tool/audio providers are still legacy runtime paths. See the
 [Windows baseline note](architecture/windows-test-ci-baseline.md) for the three
 test fixes, retained assertions and verification limits.
+
+## Native Windows Text/Core setup (YJW-00B)
+
+Upstream instructions checked on 2026-10-07:
+
+1. Install the [official Python Install Manager](https://docs.python.org/3/using/windows.html),
+   then `pymanager install 3.11`. An existing Python 3.11 installation also works;
+   verify `py -3.11 --version` before creating the venv. The startup helper uses
+   executable paths, not a combined `py -3.11` command string.
+2. Install **Node 22 x64** from the [official download selector](https://nodejs.org/en/download)
+   (select the project's 22.x line). Reopen PowerShell and check `node --version`
+   and `npm --version`.
+3. Install [Ollama for Windows](https://docs.ollama.com/windows) using its official
+   installer, or extract its standalone Windows CLI archive and add that directory
+   to the current shell's PATH. No Bash/WSL, curl or system-wide service is required.
+
+From the repository root in native PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r apps/agent/requirements.txt -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip check
+npm ci
+```
+
+If Ollama is not already running, run `npm run dev:ollama` in another PowerShell
+terminal. Download the configured text model once (outside CI):
+
+```powershell
+ollama pull qwen2.5:3b-instruct
+npm run dev
+```
+
+`npm run dev` reuses a responding Ollama server or starts `ollama serve`, waits for
+HTTP readiness, starts the agent and migrations, then Vite and a visible Electron
+window. `dev:desktop` starts agent/Vite/Electron without managing Ollama.
+Electron launched directly retains its own backend management. Every entry point
+respects `JARVIS_BACKEND_MANAGED=external`; it never stops that external backend.
+Close Electron (Windows) or quit the app (macOS), or use Ctrl-C in the launch
+terminal. Only owned children are stopped. Windows cleanup uses `taskkill /PID /T /F`
+for owned process trees; POSIX uses owned process groups with a bounded TERM/KILL
+sequence. Shutdown during a pending spawn cannot trigger a new fallback child.
+
+Python selection is `JARVIS_PYTHON_BIN`, then project `.venv/Scripts/python.exe`,
+then `python` on Windows; POSIX retains `.venv/bin/python`, `python3.11`, `python3`.
+The override is a single executable path, including spaces if needed. Use the
+project venv to ensure requirements are installed. Spawn errors ENOENT/EACCES try
+the next candidate; a launched interpreter missing dependencies fails visibly.
+All backend entry points now use the repository root as cwd, so relative
+DB/profile/runtime overrides are resolved consistently there.
+
+Optional PowerShell overrides (process environment only; `.env` is not auto-loaded):
+
+```powershell
+$env:JARVIS_PYTHON_BIN = (Resolve-Path .venv/Scripts/python.exe).Path
+$env:JARVIS_RUNTIME_DIR = Join-Path $PWD 'runtime'
+```
+
+Start with default local ports. `JARVIS_AGENT_HOST/PORT` also feed Vite's API target
+unless explicit `VITE_JARVIS_AGENT_HOST/PORT` values exist. Ollama health/start uses
+`JARVIS_OLLAMA_HOST/PORT` or `OLLAMA_HOST`; if customized, the existing stored
+`ollama_base_url` setting must match. Unreachable remote Ollama endpoints are not
+replaced by an unrelated local server. No settings or personal databases are reset.
+
+Use text input with voice mode/replies off. Existing macOS voice-list/TTS and native
+tool endpoints may report errors on Windows; this PR does not port or enable them.
+See [startup evidence and limits](architecture/windows-core-startup.md).
 
 ## 1. macOS prerequisites
 
@@ -116,15 +184,14 @@ set +a
 export JARVIS_PYTHON_BIN="$PWD/.venv/bin/python"
 ```
 
-The example sets `JARVIS_PYTHON_BIN=python3.11`; the explicit override above keeps
-the agent on the project virtual environment. `source` executes shell syntax:
+The example leaves `JARVIS_PYTHON_BIN` unset so discovery prefers the project venv;
+an existing explicit `python3.11` override remains valid. `source` executes shell syntax:
 load only your own trusted file, never an unreviewed downloaded environment file.
 Do not commit `.env`, credentials, recordings, models, or personal database files.
 YJ2-00 does not change environment defaults or automatically apply the example.
 
 Keep the baseline ports: agent `127.0.0.1:8787`, Ollama `127.0.0.1:11434`, and Vite
-`5173`. The existing root development command waits on the default agent/Ollama
-ports; coordinated custom-port support is not part of this step.
+`5173`. The shared launcher waits for HTTP readiness before opening the desktop.
 
 ## 4. Models and application startup (macOS only)
 
@@ -175,6 +242,7 @@ From the repository root, with `.venv` active and dependencies installed:
 python -m pip check
 python -m pytest -q
 python -m ruff check apps/agent/jarvis_agent tests
+npm run test:startup
 npm run typecheck
 node --check apps/desktop/electron/main.cjs
 node --check apps/desktop/electron/preload.cjs
@@ -206,6 +274,9 @@ checkout credentials are not persisted, and workflow permissions are read-only.
 Windows jobs use native PowerShell and separate validation steps so a later
 command cannot mask an earlier nonzero exit code. Both OS jobs run the complete
 Python suite; no Windows-only skips, deselection or xfails were introduced.
+Both Python jobs also run the Node 22 startup tests, including a real temporary
+backend/SQLite session and owned process-tree cleanup with and without reload.
+These tests install no models and launch no GUI.
 
 A successful job proves only its actual commands. Inspect the final PR head's
 check results and logs; never infer a pass from a workflow file existing. Consult

@@ -46,6 +46,11 @@ jobs:
           python -m pip freeze
       - name: Run the complete Python test suite
         run: python -m pytest -q
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+      - name: Test native startup and owned backend lifecycle without models or GUI
+        run: npm run test:startup
 
   python-lint:
     name: python-lint
@@ -148,6 +153,11 @@ jobs:
         run: python -m pip check
       - name: Run the complete Python test suite
         run: python -m pytest -q
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+      - name: Test native startup and owned backend lifecycle without models or GUI
+        run: npm run test:startup
 
   windows-desktop-checks:
     name: windows-desktop-checks
