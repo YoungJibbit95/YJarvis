@@ -16,7 +16,7 @@ from jarvis_agent.agent_service import AgentService
 from jarvis_agent.db import Database
 from jarvis_agent.llm import LlmError
 from jarvis_agent.orchestration import legacy_responses as response_module
-from jarvis_agent.orchestration import legacy_routing as routing_module
+from jarvis_agent.orchestration import legacy_planner as planner_module
 from jarvis_agent.orchestration import turn_engine as engine_module
 from jarvis_agent.tools import ToolRegistry
 from jarvis_agent.tools.base import ToolResult
@@ -85,7 +85,7 @@ def rig(tmp_path, monkeypatch):
     summary = AsyncMock(side_effect=AssertionError("Unexpected summary call"))
     monkeypatch.setattr(response_module, "stream_chat", stream)
     monkeypatch.setattr(response_module, "complete_chat", summary)
-    monkeypatch.setattr(routing_module, "plan_tool_call", planner)
+    monkeypatch.setattr(planner_module, "plan_tool_call", planner)
     monkeypatch.setattr(response_module, "time", SimpleNamespace(perf_counter=lambda: 1.0))
     compact_original = response_module.maybe_compact_session
 

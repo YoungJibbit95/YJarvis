@@ -4,6 +4,10 @@ This is a behavior-preserving extraction from main
 `399ce0b580ac64419cf53ee09d3c2cafafbe5906`, after external acceptance of YJW-00B.
 It is the first user-authorized part of YJ2-04, not the V2 router/planner runtime.
 
+This note records the YJ2-04A extraction. YJ2-04B subsequently moves the remaining
+planner fallback from the facade into the [legacy planner adapter](legacy-planner-adapter.md),
+preserving the priority and confirmation behavior described here.
+
 ## Boundaries and exact legacy priority
 
 `TurnEngine -> LegacyRouting compatibility facade -> routing_stages.py`.

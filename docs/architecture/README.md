@@ -65,3 +65,12 @@ passed, and main HEAD was re-read before creating the YJ2-04A branch. The user
 split YJ2-04 and authorized only [deterministic routing extraction](deterministic-routing-stages.md).
 Planner isolation (YJ2-04B), ToolSpec/ToolRuntime (YJ2-05), policy (YJ2-06) and
 Windows providers (YJW-01) remain behind the external-review gate.
+
+## YJ2-04B authorization after YJ2-04A review
+
+PR #8 was externally accepted and squash-merged as `db6dd67`. All six checks in
+[main CI](https://github.com/YoungJibbit95/YJarvis/actions/runs/37666995017)
+passed before the main HEAD was re-read and this branch created. The Linux job
+was retried on the same commit after its package installation stalled; no CI
+requirements changed. Only the [legacy planner adapter](legacy-planner-adapter.md)
+is authorized. ToolSpec/ToolRuntime, policy, providers and ActionPlan remain gated.
