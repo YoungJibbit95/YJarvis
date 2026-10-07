@@ -75,24 +75,140 @@ test("Ollama reuses a responding external HTTP endpoint and never owns it", asyn
   const server = http.createServer((req, res) => { assert.equal(req.url, "/api/tags"); res.end('{"models":[]}'); });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  t.after(() => new Promise((resolve) => server.close(resolve)));
+  t.after(() => { server.closeAllConnections(); return new Promise((resolve) => server.close(resolve)); });
   const env = { JARVIS_OLLAMA_PORT: String(server.address().port) };
-  const owner = new OwnedProcesses({ spawnProcess: () => { assert.fail("external Ollama must not spawn"); } });
+  for (let repeat = 0; repeat < 3; repeat++) {
+    const owner = new OwnedProcesses({ spawnProcess: () => { assert.fail("external Ollama must not spawn"); } });
+    assert.equal(await ensureOllama(owner, env), null);
+    assert.equal(owner.children.size, 0);
+    await owner.stop();
+    assert.equal(await healthy(new URL("/api/tags", ollamaUrl(env))), true);
+  }
+});
+
+test("Ollama confirms reuse when the first fetch expires before reaching HTTP", { timeout: 10000 }, async (t) => {
+  let requests = 0;
+  const server = http.createServer((req, res) => {
+    assert.equal(req.url, "/api/tags");
+    requests++;
+    res.end('{"models":[]}');
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); return new Promise((resolve) => server.close(resolve)); });
+  const realFetch = global.fetch;
+  let fetches = 0;
+  let firstSignal;
+  t.mock.method(global, "fetch", async (url, options) => {
+    if (++fetches === 1) {
+      firstSignal = options.signal;
+      // Model cold-start scheduling: the timeout elapses before network dispatch.
+      await once(firstSignal, "abort");
+    }
+    return realFetch(url, options); // Real fetch rejects the expired signal; no fake health result.
+  });
+  const env = { JARVIS_OLLAMA_PORT: String(server.address().port) };
+  const owner = new OwnedProcesses({ spawnProcess: () => { assert.fail("external Ollama must not spawn after a cold timeout"); } });
   assert.equal(await ensureOllama(owner, env), null);
+  assert.equal(firstSignal.reason.name, "TimeoutError");
+  assert.equal(fetches, 2);
+  assert.equal(requests, 1, "only the confirmation reached the real HTTP server");
+  assert.equal(owner.children.size, 0);
   await owner.stop();
   assert.equal(await healthy(new URL("/api/tags", ollamaUrl(env))), true);
+});
+
+test("Ollama confirms reuse over real HTTP after the first request times out", { timeout: 10000 }, async (t) => {
+  let requests = 0;
+  let firstResponse;
+  const server = http.createServer((req, res) => {
+    assert.equal(req.url, "/api/tags");
+    if (++requests === 1) firstResponse = res; // Deliberately never send the first response.
+    else res.end('{"models":[]}');
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); return new Promise((resolve) => server.close(resolve)); });
+  const env = { JARVIS_OLLAMA_PORT: String(server.address().port) };
+  const owner = new OwnedProcesses({ spawnProcess: () => { assert.fail("external Ollama must not spawn after one timeout"); } });
+  assert.equal(await ensureOllama(owner, env), null);
+  assert.equal(requests, 2);
+  assert.equal(firstResponse.writableEnded, false, "the first probe never received a response");
+  assert.equal(owner.children.size, 0);
+  await owner.stop();
+  assert.equal(await healthy(new URL("/api/tags", ollamaUrl(env))), true);
+});
+
+test("Ollama confirmation is bounded when real HTTP never responds", { timeout: 10000 }, async (t) => {
+  let requests = 0;
+  const server = http.createServer((req) => { assert.equal(req.url, "/api/tags"); requests++; });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); return new Promise((resolve) => server.close(resolve)); });
+  const calls = [];
+  const child = {};
+  const owner = { start: async (...args) => { calls.push(args); return child; } };
+  const started = performance.now();
+  assert.equal(await ensureOllama(owner, { JARVIS_OLLAMA_PORT: String(server.address().port) }), child);
+  assert.equal(requests, 2);
+  assert.equal(calls.length, 1);
+  assert.ok(performance.now() - started < 8000, "two bounded probes must finish");
+});
+
+test("healthy rejects non-2xx and connection errors from a real local endpoint", async (t) => {
+  const server = http.createServer((req, res) => { res.writeHead(503); res.end(); });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const url = `http://127.0.0.1:${server.address().port}/api/tags`;
+  assert.equal(await healthy(url), false);
+  server.closeAllConnections();
+  await new Promise((resolve) => server.close(resolve));
+  assert.equal(await healthy(url), false);
+});
+
+test("Ollama reuses an immediate or confirmed probe without acquiring ownership", async () => {
+  for (const results of [[true], [false, true]]) {
+    const owner = new OwnedProcesses({ spawnProcess: () => { assert.fail("external Ollama must not spawn"); } });
+    let probes = 0;
+    assert.equal(await ensureOllama(owner, {}, async () => results[probes++]), null);
+    assert.equal(probes, results.length);
+    assert.equal(owner.children.size, 0);
+    await owner.stop();
+  }
+});
+
+test("shutdown prevents initial, confirmation and post-probe Ollama startup", async () => {
+  for (const stopAt of [0, 1, 2]) {
+    for (const healthyResult of [false, true]) {
+      const owner = new OwnedProcesses({ spawnProcess: () => { assert.fail("shutdown must prevent spawning"); } });
+      let probes = 0;
+      if (stopAt === 0) await owner.stop();
+      await assert.rejects(ensureOllama(owner, {}, async () => {
+        if (++probes === stopAt) { await owner.stop(); return healthyResult; }
+        return false;
+      }), /Startup cancelled/);
+      assert.equal(probes, stopAt);
+      assert.equal(owner.children.size, 0);
+    }
+  }
 });
 
 test("unavailable local Ollama is spawned once, with explicit host environment", async () => {
   const calls = [];
   const child = {};
   const owner = { start: async (...args) => { calls.push(args); return child; } };
-  assert.equal(await ensureOllama(owner, { JARVIS_OLLAMA_PORT: "11499", OLLAMA_MODELS: "models with spaces" }, async () => false), child);
+  let probes = 0;
+  const offline = async () => { probes++; return false; };
+  assert.equal(await ensureOllama(owner, { JARVIS_OLLAMA_PORT: "11499", OLLAMA_MODELS: "models with spaces" }, offline), child);
+  assert.equal(probes, 2);
   assert.deepEqual(calls, [["ollama", ["serve"], { env: {
     JARVIS_OLLAMA_PORT: "11499", OLLAMA_MODELS: "models with spaces", OLLAMA_HOST: "http://127.0.0.1:11499"
   } }]]);
   assert.equal(ollamaUrl({ OLLAMA_HOST: "localhost:11500" }).origin, "http://localhost:11500");
-  await assert.rejects(ensureOllama(owner, { OLLAMA_HOST: "http://192.0.2.1:11434" }, async () => false), /External Ollama endpoint is unavailable/);
+  probes = 0;
+  await assert.rejects(ensureOllama(owner, { OLLAMA_HOST: "http://192.0.2.1:11434" }, offline), /External Ollama endpoint is unavailable/);
+  assert.equal(probes, 2);
   assert.equal(calls.length, 1);
 });
 
