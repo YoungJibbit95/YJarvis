@@ -1,20 +1,5 @@
-:root {
-  color-scheme: dark;
-  --bg-0: #040912;
-  --bg-1: #07152b;
-  --bg-2: #0a203f;
-  --panel: rgba(10, 21, 41, 0.78);
-  --panel-strong: rgba(11, 24, 47, 0.93);
-  --text: #e9f0ff;
-  --muted: #90a8d2;
-  --accent: #4ff3ff;
-  --accent-2: #6b97ff;
-  --accent-3: #74ffd2;
-  --danger: #d35d79;
-  --border: rgba(130, 183, 255, 0.24);
-  --glow: 0 0 0 1px rgba(116, 181, 255, 0.2), 0 28px 72px rgba(5, 11, 26, 0.6);
-  --panel-glass: linear-gradient(165deg, rgba(14, 28, 54, 0.94), rgba(8, 17, 33, 0.8));
-}
+@import "./design-system/tokens.css";
+@import "./design-system/primitives.css";
 
 * {
   box-sizing: border-box;
@@ -28,14 +13,14 @@ body,
 
 body {
   margin: 0;
-  font-family: "Space Grotesk", "Avenir Next", "Nunito Sans", sans-serif;
-  color: var(--text);
+  font-family: var(--yj-font-body);
+  color: var(--yj-text);
   overflow: hidden;
   background:
     radial-gradient(960px 560px at 8% -10%, rgba(85, 114, 255, 0.3) 0%, rgba(85, 114, 255, 0) 72%),
     radial-gradient(1020px 700px at 92% -14%, rgba(79, 243, 255, 0.26) 0%, rgba(79, 243, 255, 0) 74%),
     radial-gradient(860px 480px at 50% 116%, rgba(116, 255, 210, 0.14) 0%, rgba(116, 255, 210, 0) 80%),
-    linear-gradient(148deg, var(--bg-0) 0%, var(--bg-1) 48%, var(--bg-2) 100%);
+    linear-gradient(148deg, var(--yj-bg-0) 0%, var(--yj-bg-1) 48%, var(--yj-bg-2) 100%);
   background-attachment: fixed;
 }
 
@@ -163,7 +148,7 @@ p {
 }
 
 .brand-block h1 {
-  font-family: "Orbitron", "Space Grotesk", sans-serif;
+  font-family: var(--yj-font-display);
   font-size: 30px;
   letter-spacing: 0.08em;
   color: #e4fdff;
@@ -172,13 +157,13 @@ p {
 
 .brand-block p {
   margin-top: 6px;
-  color: var(--muted);
+  color: var(--yj-text-muted);
   max-width: 760px;
 }
 
 .env-pill {
   background: rgba(10, 24, 45, 0.9);
-  border: 1px solid var(--border);
+  border: 1px solid var(--yj-border);
   border-radius: 999px;
   padding: 8px 14px;
   color: #c2d5ff;
@@ -222,10 +207,10 @@ p {
 
 .status-chip {
   background: linear-gradient(160deg, rgba(12, 25, 49, 0.94), rgba(9, 17, 36, 0.8));
-  border: 1px solid var(--border);
+  border: 1px solid var(--yj-border);
   border-radius: 14px;
   padding: 10px 12px;
-  box-shadow: var(--glow);
+  box-shadow: var(--yj-shadow-panel);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -245,7 +230,7 @@ p {
 
 .status-chip.live {
   border-color: rgba(88, 216, 223, 0.44);
-  box-shadow: var(--glow), 0 0 22px rgba(88, 216, 223, 0.22);
+  box-shadow: var(--yj-shadow-panel), 0 0 22px rgba(88, 216, 223, 0.22);
   animation: chipPulse 2.2s ease-in-out infinite;
 }
 
@@ -313,7 +298,7 @@ p {
 }
 
 .command-palette h3 {
-  font-family: "Orbitron", "Space Grotesk", sans-serif;
+  font-family: var(--yj-font-display);
   letter-spacing: 0.06em;
   font-size: 14px;
 }
@@ -355,54 +340,6 @@ p {
   white-space: nowrap;
 }
 
-button {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: linear-gradient(160deg, rgba(22, 38, 70, 0.86), rgba(13, 23, 45, 0.9));
-  color: var(--text);
-  padding: 10px 14px;
-  cursor: pointer;
-  transition: 170ms ease;
-  font-family: "Space Grotesk", "Avenir Next", sans-serif;
-  letter-spacing: 0.02em;
-}
-
-button:hover {
-  border-color: rgba(112, 181, 255, 0.5);
-  transform: translateY(-1px);
-}
-
-button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-  transform: none;
-}
-
-button.active {
-  background: linear-gradient(135deg, rgba(57, 111, 214, 0.95), rgba(44, 171, 183, 0.95));
-  border-color: transparent;
-  box-shadow: 0 0 0 1px rgba(122, 213, 227, 0.32), 0 12px 26px rgba(17, 64, 103, 0.45);
-}
-
-button.secondary {
-  background: rgba(11, 20, 35, 0.54);
-}
-
-button.tiny {
-  padding: 5px 10px;
-  font-size: 12px;
-  margin-top: 8px;
-}
-
-.panel {
-  background: var(--panel-glass);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 16px;
-  box-shadow: var(--glow);
-  backdrop-filter: blur(12px) saturate(1.16);
-}
-
 .panel-header {
   display: flex;
   justify-content: space-between;
@@ -412,13 +349,13 @@ button.tiny {
 }
 
 .panel-header h2 {
-  font-family: "Orbitron", "Space Grotesk", sans-serif;
+  font-family: var(--yj-font-display);
   letter-spacing: 0.05em;
   font-size: 18px;
 }
 
 .panel-header p {
-  color: var(--muted);
+  color: var(--yj-text-muted);
   font-size: 13px;
 }
 
@@ -916,7 +853,7 @@ button.tiny {
 }
 
 .quick-actions p {
-  font-family: "Orbitron", "Space Grotesk", sans-serif;
+  font-family: var(--yj-font-display);
   letter-spacing: 0.06em;
   font-size: 12px;
   margin-bottom: 8px;
@@ -938,35 +875,12 @@ button.tiny {
 }
 
 .quick-action-button {
-  min-height: 40px;
   font-size: 13px;
 }
 
-textarea,
-input,
-select,
 pre,
 code {
-  font-family: "IBM Plex Mono", "JetBrains Mono", monospace;
-}
-
-textarea,
-input,
-select {
-  width: 100%;
-  border: 1px solid rgba(129, 176, 255, 0.28);
-  border-radius: 10px;
-  background: rgba(9, 15, 28, 0.86);
-  color: var(--text);
-  padding: 10px;
-}
-
-textarea:focus,
-input:focus,
-select:focus {
-  outline: none;
-  border-color: rgba(88, 216, 223, 0.56);
-  box-shadow: 0 0 0 1px rgba(88, 216, 223, 0.28);
+  font-family: var(--yj-font-mono);
 }
 
 .tts-voice-row {
@@ -1069,7 +983,7 @@ select:focus {
   margin-top: 6px;
   display: block;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--yj-text-muted);
 }
 
 .approval-card {
@@ -1172,7 +1086,7 @@ select:focus {
 }
 
 .empty {
-  color: var(--muted);
+  color: var(--yj-text-muted);
 }
 
 @media (max-width: 1180px) {

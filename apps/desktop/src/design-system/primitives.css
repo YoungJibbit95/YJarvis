@@ -1,0 +1,109 @@
+/* Native elements retain their existing handlers, labels and keyboard behavior. */
+button {
+  min-height: var(--yj-control-height);
+  border: 1px solid var(--yj-control-border);
+  border-radius: var(--yj-radius-control);
+  background: var(--yj-control-bg);
+  color: var(--yj-text);
+  padding: var(--yj-space-2) var(--yj-space-4);
+  font-family: var(--yj-font-body);
+  font-size: var(--yj-font-size-control);
+  line-height: var(--yj-line-height-control);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    background-color var(--yj-motion-fast) var(--yj-motion-easing),
+    border-color var(--yj-motion-fast) var(--yj-motion-easing);
+}
+
+button.secondary {
+  background: var(--yj-control-bg-secondary);
+}
+
+button.active {
+  background: var(--yj-control-bg-active);
+  border-color: var(--yj-control-border-active);
+  box-shadow: inset 0 -2px 0 var(--yj-control-border-active);
+}
+
+button:enabled:hover {
+  background-color: var(--yj-control-bg-hover);
+  border-color: var(--yj-control-border-hover);
+}
+
+button:enabled:active {
+  background-color: var(--yj-control-bg-active);
+}
+
+button.tiny {
+  min-height: var(--yj-control-height-compact);
+  padding: var(--yj-space-1) var(--yj-space-2);
+  font-size: var(--yj-font-size-small);
+  margin-top: var(--yj-space-2);
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--yj-control-height);
+  border: 1px solid var(--yj-control-border);
+  border-radius: var(--yj-radius-control);
+  background: var(--yj-control-bg-field);
+  color: var(--yj-text);
+  padding: var(--yj-space-2) var(--yj-space-3);
+  font-family: var(--yj-font-mono);
+  font-size: var(--yj-font-size-control);
+  line-height: var(--yj-line-height-control);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--yj-text-muted);
+  opacity: 1;
+}
+
+/* Keep the outline distinct from selected/hover states, including on buttons. */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: var(--yj-focus-width) solid var(--yj-accent);
+  outline-offset: var(--yj-focus-offset);
+}
+
+button:disabled,
+input:disabled,
+textarea:disabled,
+select:disabled {
+  opacity: var(--yj-control-disabled-opacity);
+  cursor: not-allowed;
+}
+
+.panel {
+  background: var(--yj-surface-panel);
+  border: 1px solid var(--yj-border);
+  border-radius: var(--yj-radius-panel);
+  padding: var(--yj-space-4);
+  box-shadow: var(--yj-shadow-panel);
+  backdrop-filter: blur(12px) saturate(1.16);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Legacy orb/background animations are decorative; no lifecycle uses their events. */
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (forced-colors: active) {
+  button.active {
+    border-color: Highlight;
+    border-bottom-width: 3px;
+  }
+}
