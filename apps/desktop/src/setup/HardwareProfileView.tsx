@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchHardwareProfile } from "../api";
 import type { HardwareProfile } from "./hardwareProfile";
+import { AcceleratorProfileView } from "./AcceleratorProfileView";
 
 export type HardwareViewState = { status: "loading" } | { status: "error" } | { status: "loaded"; profile: HardwareProfile };
 const PLATFORMS = { windows: "Windows", macos: "macOS", linux: "Linux", unknown: "Unbekannt" };
@@ -52,6 +53,6 @@ export function HardwareProfileView() {
   const [open, setOpen] = useState(false);
   return <details className="setup-hardware" onToggle={(event) => setOpen(event.currentTarget.open)}>
     <summary>Dieses System</summary>
-    {open ? <HardwareLoader /> : null}
+    {open ? <><HardwareLoader /><AcceleratorProfileView /></> : null}
   </details>;
 }

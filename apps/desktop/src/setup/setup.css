@@ -93,6 +93,11 @@
 .hardware-facts > div { min-width: 0; overflow-wrap: anywhere; }
 .hardware-facts dt { color: var(--yj-text-muted); font-size: var(--yj-font-size-small); }
 .hardware-facts dd { margin: var(--yj-space-2) 0 0; }
+.setup-accelerators { border-top: 1px solid var(--yj-border); margin-top: var(--yj-space-4); padding-top: var(--yj-space-3); }
+.setup-accelerators h3 { font-size: 16px; }
+.accelerator-list { list-style: none; padding: 0; display: grid; gap: var(--yj-space-3); }
+.accelerator-list li { min-width: 0; padding: var(--yj-space-4); border: 1px solid var(--yj-border); border-radius: var(--yj-radius-control); overflow-wrap: anywhere; }
+.accelerator-list h4 { margin: 0; font-size: 15px; }
 @media (max-width: 760px) {
   .setup-first-run { margin-top: 24px; }
   .setup-components { grid-template-columns: minmax(0, 1fr); }

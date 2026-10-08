@@ -10,6 +10,8 @@ from fastapi import APIRouter, Response
 from .bundled_model_catalog import BUNDLED_MODEL_CATALOG
 from .model_catalog import ModelCatalog
 from .hardware_profile import HardwareProfile
+from .accelerator_profile import AcceleratorProfile
+from .setup_accelerators import inspect_accelerators
 from .setup_hardware import inspect_hardware
 from .setup_readiness import SetupStatus, inspect_setup
 
@@ -20,6 +22,11 @@ def create_setup_router(
     runtime_dir: Path | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1/setup")
+
+    @router.get("/accelerators", response_model=AcceleratorProfile)
+    def setup_accelerators(response: Response) -> AcceleratorProfile:
+        response.headers["Cache-Control"] = "no-store"
+        return inspect_accelerators()
 
     @router.get("/hardware", response_model=HardwareProfile)
     def setup_hardware(response: Response) -> HardwareProfile:
