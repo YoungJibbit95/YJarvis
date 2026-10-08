@@ -26,7 +26,8 @@ def history_repo(tmp_path):
     run_git(tmp_path, "switch", "-c", "feature")
     (tmp_path / "feature.md").write_text("feature\n", encoding="utf-8")
     run_git(tmp_path, "add", "feature.md")
-    run_git(tmp_path, "commit", "-m", "Feature", "-m", "<script>never execute</script>")
+    run_git(tmp_path, "commit", "-m", "Feature", "-m",
+            "<script>never execute</script>\n{{UNTRUSTED}}\nhttps://github.com/test/repo/wiki/Absent")
     run_git(tmp_path, "switch", "main")
     (tmp_path / "one.md").write_text("second\n", encoding="utf-8")
     run_git(tmp_path, "add", "one.md")
@@ -47,6 +48,11 @@ def test_ledger_contains_every_commit_and_escapes_git_data(history_repo):
     assert "&lt;script&gt;" in combined
     assert "![tracking]" not in combined
     assert "&#91;tracking&#93;" in combined
+    assert "{{UNTRUSTED}}" not in combined
+    assert "&#123;&#123;UNTRUSTED&#125;&#125;" in combined
+    # Arbitrary commit prose must not be mistaken for an authored wiki link.
+    builder.validate_links(pages | {"Release-Notes.md": ""}, history_repo,
+                           "https://github.com/test/repo", revision)
 
 
 def test_unknown_pages_preserved_and_collision_is_atomic(tmp_path):

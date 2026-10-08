@@ -22,7 +22,7 @@ def git(root: Path, *args: str) -> str:
 
 def literal(value: str) -> str:
     # Commit messages/paths are data, never Markdown/HTML or shell instructions.
-    escaped = "".join(f"&#{ord(character)};" if character in "\\[]!*_`|#~"
+    escaped = "".join(f"&#{ord(character)};" if character in "\\[]!*_`|#~/{}"
                       else html.escape(character, quote=True) for character in value)
     return escaped.replace("\r", "").replace("\n", "<br>")
 
@@ -45,7 +45,8 @@ def history(root: Path, revision: str, repository_url: str) -> dict[str, str]:
             files.append(f"| <code>{literal(path)}</code> | {added} | {deleted} |")
         detail = f"### {date} · {literal(subject)}\n\nCommit: [{sha}]({repository_url}/commit/{sha})\n\n"
         if body.strip():
-            detail += f"<details><summary>Commit-Beschreibung</summary>\n\n<pre>{html.escape(body.strip())}</pre>\n\n</details>\n\n"
+            plain_body = literal(body.strip()).replace("<br>", "\n")
+            detail += f"<details><summary>Commit-Beschreibung</summary>\n\n<pre>{plain_body}</pre>\n\n</details>\n\n"
         if files:
             detail += "| Geänderter Pfad | Hinzugefügt | Entfernt |\n|---|---:|---:|\n" + "\n".join(files) + "\n\n"
         else:
