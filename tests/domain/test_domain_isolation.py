@@ -17,6 +17,7 @@ TOOL_RUNTIME = AGENT_PACKAGE / "tool_runtime.py"
 PROVIDER_REGISTRY = AGENT_PACKAGE / "provider_registry.py"
 WINDOWS_URL_PROVIDER = AGENT_PACKAGE / "providers" / "windows" / "url_open.py"
 WINDOWS_CLIPBOARD_PROVIDER = AGENT_PACKAGE / "providers" / "windows" / "clipboard_read.py"
+WINDOWS_CLIPBOARD_WRITE_PROVIDER = AGENT_PACKAGE / "providers" / "windows" / "clipboard_write.py"
 
 
 def test_domain_imports_only_stdlib_pydantic_and_itself():
@@ -54,7 +55,7 @@ def test_legacy_runtime_has_no_domain_kernel_registry_or_v2_provider_imports():
     # Ensure this test inspects a full repository, not a partial contract checkout.
     assert (AGENT_PACKAGE / "agent_service.py").is_file()
     for path in sorted(AGENT_PACKAGE.rglob("*.py")):
-        if DOMAIN in path.parents or path in {TOOL_RUNTIME, PROVIDER_REGISTRY, WINDOWS_URL_PROVIDER, WINDOWS_CLIPBOARD_PROVIDER}:
+        if DOMAIN in path.parents or path in {TOOL_RUNTIME, PROVIDER_REGISTRY, WINDOWS_URL_PROVIDER, WINDOWS_CLIPBOARD_PROVIDER, WINDOWS_CLIPBOARD_WRITE_PROVIDER}:
             continue
         for name in imported_names(path):
             assert not any(name == forbidden or name.startswith(forbidden + ".")
@@ -123,6 +124,30 @@ def test_clipboard_provider_imports_only_exact_contract_and_native_dependencies(
         "kernel32": {"GlobalLock", "GlobalSize", "GlobalUnlock"},
     }
     tree = ast.parse(WINDOWS_CLIPBOARD_PROVIDER.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in attributes:
+            assert node.attr in attributes[node.value.id], (node.value.id, node.attr)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            assert node.func.id not in {"open", "exec", "eval", "__import__", "getattr"}
+
+
+def test_clipboard_write_provider_imports_only_exact_contract_and_native_dependencies():
+    assert WINDOWS_CLIPBOARD_WRITE_PROVIDER.is_file()
+    assert set(imported_names(WINDOWS_CLIPBOARD_WRITE_PROVIDER)) <= {
+        "asyncio", "sys", "ctypes", "ctypes.wintypes", "functools", "functools.cache",
+        "pydantic", "pydantic.BaseModel",
+        "jarvis_agent.domain.action", "jarvis_agent.domain.action.CapabilityName",
+        "jarvis_agent.domain.tool_inputs", "jarvis_agent.domain.tool_inputs.ClipboardWriteInput",
+        "jarvis_agent.domain.tool_outputs", "jarvis_agent.domain.tool_outputs.NoDataOutput",
+    }
+    attributes = {
+        "asyncio": {"to_thread"}, "sys": {"platform"},
+        "ctypes": {"WinDLL", "set_last_error", "get_last_error", "WinError", "memmove", "c_int", "c_void_p", "c_size_t"},
+        "wintypes": {"HWND", "HMENU", "HINSTANCE", "DWORD", "LPCWSTR", "BOOL", "UINT", "HANDLE", "HGLOBAL"},
+        "user32": {"CreateWindowExW", "DestroyWindow", "OpenClipboard", "EmptyClipboard", "SetClipboardData", "CloseClipboard"},
+        "kernel32": {"GlobalAlloc", "GlobalLock", "GlobalUnlock", "GlobalFree"},
+    }
+    tree = ast.parse(WINDOWS_CLIPBOARD_WRITE_PROVIDER.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in attributes:
             assert node.attr in attributes[node.value.id], (node.value.id, node.attr)
@@ -276,6 +301,42 @@ def test_clipboard_package_import_and_registration_do_not_load_or_call_native_co
     result = run_domain_probe(tmp_path, program)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "isolated-domain-ok"
+
+
+@pytest.mark.parametrize("attempt_native", [False, True])
+def test_clipboard_write_import_and_registration_are_inert_with_native_audit_control(tmp_path, attempt_native):
+    program = textwrap.dedent('''
+        def forbid_native(event, args):
+            if event.startswith("ctypes."):
+                raise AssertionError("Unexpected native access: " + event)
+        sys.addaudithook(forbid_native)
+        if ATTEMPT_NATIVE:
+            sys.audit("ctypes.dlopen", "user32.dll")  # audit control, no actual DLL load
+        import jarvis_agent.providers.windows
+        assert not any(name.startswith("jarvis_agent.providers.windows.") for name in sys.modules)
+        from jarvis_agent.provider_registry import CapabilityProviderRegistry
+        from jarvis_agent.providers.windows.clipboard_write import WindowsClipboardWriteProvider
+        registry = CapabilityProviderRegistry()
+        provider = WindowsClipboardWriteProvider()
+        assert registry.available_capabilities() == ()
+        registry.register("clipboard.write", provider)
+        assert registry.available_capabilities() == ("clipboard.write",)
+        assert registry.resolve("clipboard.write") is provider
+        assert CapabilityProviderRegistry().available_capabilities() == ()
+        allowed = {"jarvis_agent.domain", "jarvis_agent.tool_runtime",
+                   "jarvis_agent.provider_registry", "jarvis_agent.providers",
+                   "jarvis_agent.providers.windows", "jarvis_agent.providers.windows.clipboard_write"}
+        unexpected = [name for name in sys.modules if name.startswith("jarvis_agent.")
+                      and name not in allowed and not name.startswith("jarvis_agent.domain.")]
+        assert not unexpected, unexpected
+    ''')
+    result = run_domain_probe(tmp_path, f"ATTEMPT_NATIVE = {attempt_native!r}\n" + program)
+    if attempt_native:
+        assert result.returncode != 0
+        assert "Unexpected native access: ctypes.dlopen" in result.stderr
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout.strip() == "isolated-domain-ok"
 
 
 @pytest.mark.parametrize("use_registry", [False, True])
