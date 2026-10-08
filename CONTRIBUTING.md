@@ -12,14 +12,14 @@ later subsystems early. Read the accepted
 Windows 11 x64 is the primary current target; macOS Apple Silicon stays first-class
 and Linux remains headless CI. Text/Core startup does not imply native tool/audio parity.
 
-YJ2-00 through YJ2-05C1 and YJW-00A/B/B.1 are accepted. The current authorization is
-**YJ2-05C2 only**: an OS-neutral registry for explicit semantic provider registration,
-exact lookup, registration availability and delegation through the unchanged C1 kernel.
+YJ2-00 through YJ2-05C2 and YJW-00A/B/B.1 are accepted. The current authorization is
+**YJW-01A only**: one isolated Windows semantic `url.open` provider, composed only
+explicitly through the unchanged C1 kernel and C2 registry.
 Spec metadata/input/output contracts remain unchanged; application execution stays legacy.
-See the [registry note](docs/architecture/capability-provider-registry.md).
+See the [Windows URL provider note](docs/architecture/windows-url-provider.md).
 Adapters, production wiring, timeout enforcement, Observations, persistence/events,
-planner/router changes, policy, real OS providers/discovery, planner availability,
-file safety, audio, UI and packaging remain out of scope.
+planner/router changes, policy, apps/clipboard/files providers, auto-discovery,
+planner availability, macOS provider migration, audio, UI and packaging remain out of scope.
 Architectural violations require a documented decision and explicit approval,
 not an opportunistic refactor.
 
@@ -32,8 +32,8 @@ Never work directly on `main` or overwrite another contributor's work.
 For the current step:
 
 ```text
-Branch: yjv2/05c2-provider-registry
-PR: [YJ2-05C2] Add semantic provider registry and availability boundary
+Branch: yjv2/w01a-windows-url-provider
+PR: [YJW-01A] Add Windows semantic URL-open provider
 ```
 
 Use the PR template in full. Keep changes narrowly reviewable and reversible.
@@ -96,5 +96,5 @@ available checks are green, hand it to the user for external ChatGPT review
 against the actual diff and the architecture, then stop completely. No next
 branch, next PR, scaffold, or preparatory commit is allowed. CI success is not
 user approval. Only explicit user authorization after external review unlocks
-the next step. After YJ2-05C2, adapters, YJ2-05C3,
-YJW-01 and audio work remain blocked until explicit next-step approval after review.
+the next step. After YJW-01A, YJW-01B, adapters, YJ2-05C3
+and audio work remain blocked until explicit next-step approval after review.
