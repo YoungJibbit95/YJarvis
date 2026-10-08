@@ -5,6 +5,8 @@ import type { ModelCatalogEntry, ModelSource } from "./modelCatalog";
 export type CatalogBrowseState = { status: "loading" } | { status: "error" } | { status: "loaded"; entries: ModelCatalogEntry[] };
 const CATEGORIES = { chat: "Chat", speech_to_text: "Spracheingabe", text_to_speech: "Sprachausgabe" };
 const BACKENDS = { ollama: "Ollama", whisper_cpp: "whisper.cpp", piper: "Piper" };
+const ROLES = { chat: "Denken & Dialog", speech_to_text: "Dich verstehen", text_to_speech: "Mit dir sprechen" };
+const MARKS = { chat: "C", speech_to_text: "STT", text_to_speech: "TTS" };
 const numbers = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 });
 
 function SourceInfo({ source }: { source: ModelSource }) {
@@ -21,15 +23,18 @@ export function ModelCatalogContent({ state, onRetry }: { state: CatalogBrowseSt
   return <ul className="catalog-grid">
     {state.entries.map((model) => {
       const size = model.acquisition.approximate_download_bytes;
-      return <li key={model.id} className="catalog-card">
-        <span className="catalog-category">{CATEGORIES[model.category]}</span>
-        <h3>{model.display_name}</h3>
-        <p>{model.description}</p>
+      return <li key={model.id} className="catalog-card" data-category={model.category}>
+        <div className="catalog-identity">
+          <span className="catalog-mark" aria-hidden="true">{MARKS[model.category]}</span>
+          <div><p>{ROLES[model.category]}</p><span className="catalog-category">{CATEGORIES[model.category]}</span></div>
+        </div>
+        <div className="catalog-description">
+          <h3>{model.display_name}</h3>
+          <p>{model.description}</p>
+        </div>
         <dl className="catalog-facts">
           <div><dt>Herausgeber</dt><dd>{model.publisher}</dd></div>
-          <div><dt>Backend</dt><dd>{BACKENDS[model.runtime.backend]}</dd></div>
           {size !== null ? <div><dt>Downloadgröße · ungefähr</dt><dd>{numbers.format(size / (size >= 1e9 ? 1e9 : 1e6))} {size >= 1e9 ? "GB" : "MB"}</dd></div> : null}
-          {model.context_window_tokens !== null ? <div><dt>Kontext laut Herausgeber</dt><dd>{numbers.format(model.context_window_tokens)} Tokens</dd></div> : null}
           {model.licenses.map((license) => <div key={license.scope}>
             <dt>{license.scope === "model" ? "Modelllizenz" : "Datensatzlizenz"}</dt>
             <dd>{license.name ?? "Nicht eindeutig angegeben"}</dd>
@@ -38,6 +43,8 @@ export function ModelCatalogContent({ state, onRetry }: { state: CatalogBrowseSt
         <details className="catalog-details">
           <summary>Quellen und technische Details</summary>
           <dl className="catalog-facts">
+            <div><dt>Backend</dt><dd>{BACKENDS[model.runtime.backend]}</dd></div>
+            {model.context_window_tokens !== null ? <div><dt>Kontext laut Herausgeber</dt><dd>{numbers.format(model.context_window_tokens)} Tokens</dd></div> : null}
             <div><dt>Katalog-ID</dt><dd><code>{model.id}</code></dd></div>
             <div><dt>Modell-ID</dt><dd><code>{model.model_id}</code></dd></div>
             <div><dt>Backend-Modell-ID</dt><dd><code>{model.runtime.model_id}</code></dd></div>

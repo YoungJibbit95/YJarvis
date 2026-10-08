@@ -1,44 +1,52 @@
 :root {
   color-scheme: dark;
-
-  --yj-bg-0: #040912;
-  --yj-bg-1: #07152b;
-  --yj-bg-2: #0a203f;
-  --yj-text: #e9f0ff;
-  --yj-text-muted: #90a8d2;
-  --yj-accent: #4ff3ff;
-  --yj-border: rgba(130, 183, 255, 0.24);
-  --yj-surface-panel: linear-gradient(165deg, rgba(14, 28, 54, 0.94), rgba(8, 17, 33, 0.8));
-  --yj-shadow-panel: 0 0 0 1px rgba(116, 181, 255, 0.2), 0 28px 72px rgba(5, 11, 26, 0.6);
-
-  --yj-control-bg: #14263e;
-  --yj-control-bg-secondary: #0c192b;
-  --yj-control-bg-hover: #1b3552;
-  --yj-control-bg-active: #153f4c;
-  --yj-control-bg-field: #090f1c;
-  --yj-control-border: #536d8f;
-  --yj-control-border-hover: #7badd1;
-  --yj-control-border-active: #5ddcf0;
-  --yj-control-disabled-opacity: 0.55;
-
-  /* System fallbacks keep these foundations available without font downloads. */
-  --yj-font-body: "Space Grotesk", "Segoe UI", "Avenir Next", sans-serif;
-  --yj-font-display: "Orbitron", var(--yj-font-body);
-  --yj-font-mono: "IBM Plex Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  --yj-bg-0: #050a12;
+  --yj-bg-1: #091624;
+  --yj-bg-2: #132c45;
+  --yj-text: #edf5fb;
+  --yj-text-muted: #a0b2c6;
+  --yj-accent: #68e4f2;
+  --yj-cobalt: #769aff;
+  --yj-success: #9aebcd;
+  --yj-warning: #f0c581;
+  --yj-error: #ffadbb;
+  --yj-border: rgba(156, 195, 220, .18);
+  --yj-border-lit: rgba(104, 228, 242, .4);
+  --yj-surface-panel: linear-gradient(145deg, rgba(19, 36, 53, .8), rgba(8, 18, 30, .75));
+  --yj-surface-raised: #142334;
+  --yj-shadow-panel: 0 20px 60px #01061155;
+  --yj-presence-glow: 0 0 40px #56d9f129;
+  --yj-control-bg: #19384a;
+  --yj-control-bg-secondary: #0d1c2b;
+  --yj-control-bg-hover: #234b5d;
+  --yj-control-bg-active: #1d4754;
+  --yj-control-bg-field: #070f1b;
+  --yj-control-border: #4b6378;
+  --yj-control-border-hover: #a0d8e0;
+  --yj-control-border-active: #68e4f2;
+  --yj-control-disabled-opacity: .55;
+  /* Intentionally installed system fonts; no unbundled/remote brand fonts. */
+  --yj-font-body: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  --yj-font-display: "Bahnschrift", "Avenir Next", var(--yj-font-body);
+  --yj-font-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   --yj-font-size-control: 14px;
   --yj-font-size-small: 12px;
-  --yj-line-height-control: 1.4;
-
+  --yj-line-height-control: 1.45;
   --yj-space-1: 4px;
   --yj-space-2: 8px;
   --yj-space-3: 12px;
   --yj-space-4: 16px;
-  --yj-radius-control: 10px;
-  --yj-radius-panel: 18px;
+  --yj-space-5: 24px;
+  --yj-space-6: 32px;
+  --yj-radius-control: 12px;
+  --yj-radius-panel: 24px;
   --yj-control-height: 44px;
   --yj-control-height-compact: 32px;
   --yj-focus-width: 2px;
   --yj-focus-offset: 3px;
   --yj-motion-fast: 160ms;
-  --yj-motion-easing: ease-out;
+  --yj-motion-state: 360ms;
+  --yj-motion-breathe: 8s;
+  --yj-motion-orbit: 24s;
+  --yj-motion-easing: cubic-bezier(.2, .7, .2, 1);
 }
