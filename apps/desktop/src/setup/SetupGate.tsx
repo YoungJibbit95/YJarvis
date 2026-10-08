@@ -7,12 +7,18 @@ import type { SetupCheck } from "./types";
 import { ModelCatalogBrowser } from "./ModelCatalogBrowser";
 import { HardwareProfileView } from "./HardwareProfileView";
 import { PresenceCore } from "../app/PresenceStage";
+import { GuidedInstaller } from "./GuidedInstaller";
 
 export function SetupGate() {
   const [check, setCheck] = useState<SetupCheck>({ state: "checking", backendReachable: false });
   const [enteredApp, setEnteredApp] = useState(false);
   const generation = useRef(0);
   const pending = useRef<AbortController | null>(null);
+  const configured = useRef(false);
+
+  function rememberEntry() {
+    try { window.localStorage.setItem("jarvis.setup.entered", "1"); } catch { /* Private browser modes may disable storage. */ }
+  }
 
   const refresh = useCallback(async () => {
     pending.current?.abort();
@@ -31,7 +37,11 @@ export function SetupGate() {
       const report = await fetchSetupStatus(controller.signal);
       if (request !== generation.current) return;
       setCheck({ state: report.state, backendReachable, report });
-      if (report.state === "ready" || report.state === "degraded") setEnteredApp(true);
+      let visited = false;
+      try { visited = window.localStorage.getItem("jarvis.setup.entered") === "1"; } catch { /* Keep walkthrough usable without storage. */ }
+      if ((report.state === "ready" || report.state === "degraded") && (visited || configured.current)) {
+        rememberEntry(); setEnteredApp(true);
+      }
     } catch {
       if (request === generation.current) setCheck({ state: "error", backendReachable });
     } finally {
@@ -57,26 +67,23 @@ export function SetupGate() {
           </div>
           <div className="activation-copy">
             <p className="eyebrow">Dein persönlicher Assistent · Einrichtung</p>
-            <h2 id="setup-title">{check.state === "needs_setup" ? <>Dein Jarvis.<br /><span>Dein nächster Schritt.</span></> : SETUP_LABELS[check.state]}</h2>
+            <h2 id="setup-title">{check.state === "needs_setup" ? <>Dein Jarvis.<br /><span>Jetzt einrichten.</span></> : SETUP_LABELS[check.state]}</h2>
             <p className="setup-intro" role="status">{check.state === "needs_setup"
-              ? "Jarvis braucht noch lokale AI-Komponenten. Hier siehst du, was vorhanden ist und was noch fehlt."
+              ? "Wähle Chat, Sprache und Stimme. Jarvis richtet die passenden Komponenten für dich ein."
               : check.state === "error" ? "Es gibt noch kein verlässliches Ergebnis. Du kannst die Verbindung prüfen und es erneut versuchen."
               : "Jarvis liest die vorhandene Konfiguration und prüft deinen Modell-Endpunkt."}</p>
             <div className="setup-actions">
               <button type="button" disabled={check.state === "checking"} onClick={() => void refresh()}>Erneut prüfen</button>
-              {check.backendReachable ? <button type="button" className="secondary" onClick={() => setEnteredApp(true)}>Später · App ansehen</button> : null}
+              {check.backendReachable ? <button type="button" className="secondary" onClick={() => { rememberEntry(); setEnteredApp(true); }}>App ansehen</button> : null}
             </div>
             <p className="setup-footnote">Ohne bestätigtes Chat-Modell bleibt der Chat gesperrt. Einstellungen und Freigaben bleiben in der App erreichbar.</p>
           </div>
         </div>
+        {check.backendReachable && <GuidedInstaller onConfigured={() => { configured.current = true; void refresh(); }} />}
         <div className="activation-capabilities">
           <div className="section-heading"><p className="eyebrow">Was schon vorhanden ist</p><h3>Die Bausteine deines Assistenten</h3></div>
           <SetupStatusView check={check} />
         </div>
-        <details className="setup-explanation technical-details"><summary>Was wird bei der Einrichtung geprüft?</summary>
-          <p>Diese Prüfung installiert nichts und ändert keine Einstellungen. Sie fragt nur den konfigurierten Modell-Endpunkt ab und prüft vorhandene Modellpfade.</p>
-          <p>Du kannst die App ansehen und vorhandene Komponenten in den Einstellungen eintragen. Eine geführte Modellinstallation ist hier noch nicht verfügbar.</p>
-        </details>
         <ModelCatalogBrowser />
         <HardwareProfileView />
       </main>

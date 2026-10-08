@@ -1,5 +1,16 @@
 const path = require("node:path");
 const fs = require("node:fs");
+const net = require("node:net");
+
+async function checkBackendPort(port = 8787) {
+  await new Promise((resolve, reject) => {
+    const server = net.createServer(socket => socket.destroy());
+    server.once("error", (error) => reject(error.code === "EADDRINUSE"
+      ? new Error(`Port ${port} wird bereits verwendet. Bitte die andere YJarvis-Instanz schließen oder einen extern verwalteten Backend-Start ausdrücklich konfigurieren.`)
+      : error));
+    server.listen(port, "127.0.0.1", () => server.close(resolve));
+  });
+}
 
 function packagedBackendOptions(resourcesPath, userData, env = process.env) {
   return {
@@ -16,8 +27,9 @@ function packagedBackendOptions(resourcesPath, userData, env = process.env) {
   };
 }
 
-async function startPackagedBackend(owner, resourcesPath, userData, env = process.env) {
+async function startPackagedBackend(owner, resourcesPath, userData, env = process.env, checkPort = checkBackendPort) {
   if (env.JARVIS_BACKEND_MANAGED === "external") return null;
+  await checkPort();
   fs.mkdirSync(userData, { recursive: true });
   const { command, args, ...options } = packagedBackendOptions(resourcesPath, userData, env);
   return owner.start(command, args, options);
@@ -34,4 +46,4 @@ function rendererFile(url, root) {
   return file;
 }
 
-module.exports = { packagedBackendOptions, startPackagedBackend, rendererFile };
+module.exports = { packagedBackendOptions, startPackagedBackend, rendererFile, checkBackendPort };

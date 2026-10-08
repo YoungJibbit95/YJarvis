@@ -2,6 +2,13 @@
 
 ## Sources and scope
 
+On 2026-10-08 the user authorized **guided local setup** as one combined step:
+model/voice/component installation buttons, automatic configuration, Windows
+speech runtime verification/playback, and UI animations. They explicitly asked
+to combine as much as possible in one step. See
+[guided setup](docs/architecture/guided-setup.md); this supersedes the earlier
+model-acquisition/audio exclusions only for that user-facing setup goal.
+
 On 2026-10-08 the user explicitly authorized a separate **Windows installer
 support** step: Windows x64 NSIS packaging, a bundled backend, installed process
 startup/data placement and packaging checks. The user also explicitly requested

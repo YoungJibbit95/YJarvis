@@ -1,13 +1,27 @@
 .setup-screen { height: 100%; overflow: auto; padding: 24px 36px 56px; }
+.guided-installer { margin: 36px 0; padding: 28px; border: 1px solid var(--yj-border-lit); border-radius: 18px; background: #10243180; }
+.guided-installer > p { margin-top: 14px; color: var(--yj-text-muted); font-size: 13px; line-height: 1.7; }
+.installation-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 24px; border: 0; padding: 0; margin: 28px 0; min-width: 0; }
+.installation-choice { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.installation-choice label { font-size: 13px; font-weight: 600; }
+.installation-choice input, .installation-choice select { width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--yj-border); border-radius: 9px; background: #081923; color: var(--yj-text); }
+.installation-choice small { color: var(--yj-text-muted); font-size: 11px; line-height: 1.7; flex: 1; }
+.installation-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.installation-progress { display: flex; flex-direction: column; gap: 12px; margin-top: 24px; padding: 20px; border-radius: 12px; background: #06121c; font-size: 13px; }
+.installation-progress progress { width: 100%; height: 8px; accent-color: var(--yj-accent); }
+.installation-progress span { color: var(--yj-text-muted); font-size: 11px; }
+.installation-progress[data-status="completed"] strong { color: var(--yj-success); }
+.installation-error, .installation-progress[data-status="failed"] { color: var(--yj-error); }
+@media (max-width: 850px) { .installation-grid { grid-template-columns: 1fr; } .guided-installer { padding: 20px; } }
 .setup-screen > .shell-header { max-width: 1200px; margin: auto; }
 .setup-first-run { max-width: 1120px; margin: 28px auto 0; }
-.activation-hero { display: grid; grid-template-columns: minmax(240px,36%) minmax(0,1fr); align-items: center; gap: 60px; padding: 36px 0 42px; }
-.activation-presence { min-height: 310px; display: grid; place-items: center; position: relative; }
-.activation-presence .conversation-orb { --orb-size: 280px; }
-.activation-copy h2 { font: 400 clamp(32px,4.3vw,57px)/1.08 var(--yj-font-display); letter-spacing: -.045em; margin: 20px 0; }
+.activation-hero { display: grid; grid-template-columns: minmax(180px,25%) minmax(0,1fr); align-items: center; gap: 40px; padding: 12px 0 16px; }
+.activation-presence { min-height: 200px; display: grid; place-items: center; position: relative; }
+.activation-presence .conversation-orb { --orb-size: 170px; }
+.activation-copy h2 { font: 400 clamp(28px,3vw,40px)/1.08 var(--yj-font-display); letter-spacing: -.045em; margin: 12px 0; }
 .activation-copy h2 span { color: #b9d5e4; }
 .setup-intro { max-width: 48ch; color: var(--yj-text-muted); line-height: 1.8; font-size: 15px; }
-.setup-actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 26px 0 16px; }
+.setup-actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 10px; }
 .setup-actions > button:first-child { border-color: var(--yj-border-lit); }
 .setup-footnote { font-size: 11px; line-height: 1.7; color: var(--yj-text-muted); max-width: 60ch; }
 .activation-capabilities { border-top: 1px solid var(--yj-border); padding-top: 24px; }

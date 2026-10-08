@@ -32,6 +32,7 @@ import { AppFeedback, type ConnectionState, type FailureKind, type Failures } fr
 import { ActionReview } from "./app/ActionReview";
 import { SetupNotice } from "./setup/SetupStatusView";
 import type { SetupCheck } from "./setup/types";
+import { GuidedInstaller } from "./setup/GuidedInstaller";
 
 type AssistantMode = "idle" | "thinking" | "speaking";
 
@@ -1324,7 +1325,9 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
         setSettings(initialSettings);
         setSettingsDraft(initialSettings);
         setEntities(initialEntities);
-        refreshAudioVoices().catch((error) => reportFailure("voice", "Stimmen konnten nicht geladen werden", error));
+        if (initialSettings.tts_engine.trim().toLowerCase() === "say") {
+          refreshAudioVoices().catch((error) => reportFailure("voice", "Stimmen konnten nicht geladen werden", error));
+        }
       } catch (error) {
         if (!cancelled) {
           reportFailure("session", "Session konnte nicht vollständig geladen werden", error);
@@ -1704,8 +1707,15 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
           <div><p className="eyebrow">Dein Jarvis, deine Einstellungen</p><h2>Einstellungen</h2></div>
           <p>Änderungen gelten erst nach dem Speichern.</p>
         </header>
-
         <div className="panel-scroll settings-scroll">
+          <GuidedInstaller onConfigured={fields => {
+            void fetchSettings().then(latest => {
+              const changed = Object.fromEntries(fields.map(key => [key, latest[key]])) as Partial<JarvisSettings>;
+              setSettings(latest); setSettingsDraft(draft => ({ ...draft, ...changed }));
+              void onRecheckSetup();
+            }).catch(() => setStatus("Einrichtung gespeichert; Einstellungen konnten nicht neu geladen werden."));
+          }} />
+
           <section className="settings-section">
             <header><h3>Allgemein</h3><p>Die Sprache deines Assistenten.</p></header>
             <div>

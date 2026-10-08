@@ -132,7 +132,8 @@ async function appHarness(apiOverrides = {}) {
   const { default: App } = load("../App.tsx", {
     react: hooks, "./api": api, "./app/AppShell": { AppShell },
     "./app/AppFeedback": { AppFeedback }, "./app/PresenceStage": { PresenceStage, runStateLabel },
-    "./app/ActionReview": { ActionReview }, "./setup/SetupStatusView": { SetupNotice }
+    "./app/ActionReview": { ActionReview }, "./setup/SetupStatusView": { SetupNotice },
+    "./setup/GuidedInstaller": { GuidedInstaller: () => null }
   }, {
     Error, WebSocket: Socket,
     navigator: { mediaDevices: { getUserMedia: async () => { throw new Error("Microphone denied"); } } },
@@ -166,6 +167,12 @@ async function appHarness(apiOverrides = {}) {
     }
   };
 }
+
+test("Piper startup does not enumerate macOS say voices", async () => {
+  let requests = 0;
+  await appHarness({ fetchAudioVoices: async () => { requests++; return []; } });
+  assert.equal(requests, 0);
+});
 
 test("real socket callbacks retain interruption through retries and recover only on open", async () => {
   const app = await appHarness();

@@ -3,11 +3,27 @@ import { parseSetupStatus, type SetupStatus } from "./setup/types";
 import { parseModelCatalog, type ModelCatalogEntry } from "./setup/modelCatalog";
 import { parseHardwareProfile, type HardwareProfile } from "./setup/hardwareProfile";
 import { parseAcceleratorProfile, type AcceleratorProfile } from "./setup/acceleratorProfile";
+import { parseInstallOptions, parseInstallState, type InstallSelection } from "./setup/installTypes";
 
 const AGENT_HOST = import.meta.env.VITE_JARVIS_AGENT_HOST || "127.0.0.1";
 const AGENT_PORT = import.meta.env.VITE_JARVIS_AGENT_PORT || "8787";
 const API_BASE = `http://${AGENT_HOST}:${AGENT_PORT}`;
 const WS_BASE = `ws://${AGENT_HOST}:${AGENT_PORT}`;
+
+export async function setupInstallation(action: "status" | "start" | "cancel", selection?: InstallSelection, signal?: AbortSignal) {
+  const response = await fetch(`${API_BASE}/v1/setup/install`, {
+    method: action === "start" ? "POST" : action === "cancel" ? "DELETE" : "GET",
+    ...(selection ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(selection) } : {}), signal
+  });
+  if (!response.ok) throw new Error(await readErrorDetails(response, "Einrichtung nicht erreichbar"));
+  return parseInstallState(await response.json());
+}
+
+export async function fetchInstallOptions(signal: AbortSignal) {
+  const response = await fetch(`${API_BASE}/v1/setup/install/options`, { signal });
+  if (!response.ok) throw new Error(await readErrorDetails(response, "Modellauswahl nicht erreichbar"));
+  return parseInstallOptions(await response.json());
+}
 
 export type ChatMessage = {
   id: number;
