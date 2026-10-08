@@ -13,7 +13,7 @@ Stand dieser Einordnung ist der fachlich geprüfte Commit in der Fußzeile.
 | Windows-Grafikadapter | DXGI-Beschreibungen, dedizierter Speicher, Shared-Memory-Limit, Klassifikation | integriert, lesend; kein Nachweis verfügbarer KI-Beschleunigung |
 | Sprache | Mikrofonsegmentierung, Whisper-STT, Piper/`say`-TTS, Text-only, Echo-Unterdrückung | Legacy; macOS-Pfad, Windows-Audio unbestätigt |
 | Apps/Browser | URL/App-Öffnen, Raycast öffnen/Kommandos | native Legacy-macOS-Tools mit Freigabe |
-| Zwischenablage | Text lesen und ersetzen | Legacy `pbpaste`/`pbcopy`; Windows noch nicht veröffentlicht |
+| Zwischenablage | Text lesen und ersetzen | Legacy `pbpaste`/`pbcopy`; keine produktive Windows-Verdrahtung |
 | Produktivität | Erinnerungen, Kalender, Notizen, Mailentwurf, Nachrichten, Kontakte, Musik | AppleScript/macOS; keine Windows-Parität |
 | Dateien | Text lesen, überschreiben, anhängen | Legacy mit erlaubten Pfaden; keine Windows-Mutationsfreigabe |
 | Lernen | explizite Trigger, gespeicherte Einzelaktionen, Erfolgs-/Latenzstatistik | Legacy; keine allgemeinen autonomen Lernprozesse |
@@ -24,6 +24,7 @@ Stand dieser Einordnung ist der fachlich geprüfte Commit in der Fußzeile.
 | V2-Verträge | Turn, Action, Plan, PolicyDecision, Observation, typed ToolSpec/Inputs/Outputs | isolierte Domain-Verträge; kein neuer Produktions-Wire-Vertrag |
 | V2-Runtime | semantischer Katalog, Runtime-Kernel, explizite Provider-Registry | isoliert; keine Auto-Discovery, Timeout-Enforcement oder Policy |
 | Windows URL-Provider | typisierte HTTP(S)-Übergabe an `os.startfile` | isoliert; kein Browser-Ladebeweis, keine Chat-Freischaltung |
+| Windows Clipboard-Read-Provider | Unicode-Text über eine lesende Win32-Grenze | isoliert; kein Clipboard-Schreiben, keine Chat-Freischaltung |
 
 Mehr Details: [Chat/Desktop]({{WIKI}}/Chat-und-Desktop),
 [Tools]({{WIKI}}/Tools-und-Integrationen), [Sprache]({{WIKI}}/Sprache-und-Audio),

@@ -35,8 +35,9 @@ stehen getrennt von den laufenden Wire-/DB-Namen.
 Der semantische `ToolRuntime`-Kernel kann explizit injizierte Provider aufrufen
 und Ein-/Ausgaben validieren. Die Provider-Registry unterscheidet bekannte Specs
 von explizit verfügbar gemachten Providern. Es gibt keine automatische
-Registrierung bei Import. Der Windows-URL-Provider ist ein solcher isolierter
-Baustein. Kernel/Registry/Provider sind kein neuer produktiver Ausführungspfad.
+Registrierung bei Import. Die Windows-Provider für URL-Öffnen und Clipboard-Lesen
+sind solche isolierten Bausteine. Beide werden nur durch explizite Registrierung
+verfügbar. Kernel/Registry/Provider sind kein neuer produktiver Ausführungspfad.
 Timeout-Metadaten werden dabei noch nicht erzwungen; Policy, Observations,
 Execution-Persistenz und Events folgen später.
 
