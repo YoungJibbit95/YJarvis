@@ -30,6 +30,8 @@ from .schemas import (
 )
 from .smarthome import HomeAssistantStubProvider
 from .setup_api import create_setup_router
+from .setup_installation import SetupInstaller
+from .setup_install_api import create_install_router
 from .tools import ToolRegistry
 
 config = load_config()
@@ -51,7 +53,9 @@ agent_service = AgentService(
 smarthome_provider = HomeAssistantStubProvider(database)
 
 app = FastAPI(title="Jarvis Local Agent", version="0.1.0")
-app.include_router(create_setup_router(database.get_settings, config.default_whisper_model, config.runtime_dir))
+setup_installer = SetupInstaller(config.runtime_dir, database.get_settings, database.update_settings_if_current)
+app.include_router(create_setup_router(database.get_settings, config.default_whisper_model, config.runtime_dir, setup_installer.voice_verified))
+app.include_router(create_install_router(setup_installer))
 
 app.add_middleware(
     CORSMiddleware,
@@ -70,6 +74,12 @@ app.add_middleware(
 async def startup_event() -> None:
     await database.init()
     ensure_profile(config.profile_path)
+    await setup_installer.startup()
+
+
+@app.on_event("shutdown")
+async def shutdown_setup() -> None:
+    await setup_installer.close()
 
 
 @app.get("/health")

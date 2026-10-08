@@ -30,7 +30,7 @@ test("bundled backend spawn failures propagate without Python fallback", async (
   const data = path.join(temp, "user data");
   let calls = 0;
   try {
-    await assert.rejects(startPackagedBackend({ start: async () => { calls++; throw new Error("missing backend"); } }, temp, data, {}), /missing backend/);
+    await assert.rejects(startPackagedBackend({ start: async () => { calls++; throw new Error("missing backend"); } }, temp, data, {}, async () => {}), /missing backend/);
     assert.equal(calls, 1);
     assert.ok(fs.statSync(data).isDirectory());
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }

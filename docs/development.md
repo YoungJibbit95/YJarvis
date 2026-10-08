@@ -2,6 +2,9 @@
 
 ## What this baseline covers
 
+The [guided setup](architecture/guided-setup.md) note covers first-run component
+downloads, automatic configuration, verification and Windows playback limits.
+
 For the explicitly authorized Windows x64 installer build, prerequisites,
 installed data paths and verification limits, see
 [Windows installer support](architecture/windows-installer.md).

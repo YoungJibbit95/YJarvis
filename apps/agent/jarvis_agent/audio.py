@@ -671,9 +671,16 @@ async def speak_text(
         if not output_wav.exists() or output_wav.stat().st_size <= 0:
             raise AudioError("Piper Synthese lieferte keine Audiodatei.")
 
-        playback = await _run_subprocess(["afplay", str(output_wav)])
-        if playback.returncode != 0:
-            raise AudioError(_compact_error_message(playback.stderr or playback.stdout or "Audio Playback fehlgeschlagen"))
+        if sys.platform == "darwin":
+            playback = await _run_subprocess(["afplay", str(output_wav)])
+            if playback.returncode != 0:
+                raise AudioError(_compact_error_message(playback.stderr or playback.stdout or "Audio Playback fehlgeschlagen"))
+        else:
+            from .audio_playback import play_wav
+            try:
+                await asyncio.to_thread(play_wav, output_wav)
+            except Exception as error:
+                raise AudioError(f"Audioausgabe fehlgeschlagen: {error}") from error
     finally:
         _remove_path(output_wav)
 

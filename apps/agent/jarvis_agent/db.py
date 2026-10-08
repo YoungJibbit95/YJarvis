@@ -709,6 +709,24 @@ class Database:
 
         return await self.get_settings()
 
+    async def update_settings_if_current(self, update: dict[str, Any], expected: dict[str, Any]) -> dict[str, Any]:
+        """Atomically reject stale setup writes; no allowlist or schema change."""
+        if set(update) - {"model_name", "tts_engine", "tts_model_path", "tts_voice", "whisper_model_path", "whisper_binary"}:
+            raise ValueError("Unsupported setup settings")
+        async with self._connect() as connection:
+            await connection.execute("BEGIN IMMEDIATE")
+            try:
+                current = await self.get_settings()
+                if any(current.get(key) != expected.get(key) for key in update):
+                    raise ValueError("Einstellungen wurden inzwischen geändert. Bitte Einrichtung erneut starten.")
+                for key, value in update.items():
+                    await connection.execute("INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, str(value)))
+                await connection.commit()
+            except BaseException:
+                await connection.rollback()
+                raise
+        return await self.get_settings()
+
     async def list_smarthome_entities(self) -> list[dict[str, Any]]:
         async with self._connect() as connection:
             rows = await self._fetchall(

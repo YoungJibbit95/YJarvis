@@ -5,13 +5,13 @@ import { HardwareProfileView } from "./HardwareProfileView";
 export const SETUP_LABELS: Record<SetupCheck["state"], string> = {
   checking: "Einrichtung wird geprüft",
   needs_setup: "Chat braucht noch Einrichtung",
-  ready: "Text-Chat bereit",
+  ready: "Jarvis ist bereit",
   degraded: "Text-Chat bereit · Voice eingeschränkt",
   error: "Einrichtung konnte nicht geprüft werden"
 };
 
 const REASONS: Record<string, string> = {
-  chat_model_present: "Das konfigurierte Chat-Modell ist vorhanden. Inferenz wurde nicht getestet.",
+  chat_model_present: "Das konfigurierte Chat-Modell ist vorhanden. Diese Statusprüfung führt keine Inferenz aus.",
   chat_model_missing: "Das konfigurierte Chat-Modell fehlt am Modell-Endpunkt.",
   chat_model_not_configured: "Es ist noch kein Chat-Modell konfiguriert.",
   ollama_unreachable: "Der konfigurierte Ollama-Endpunkt ist nicht erreichbar.",
@@ -22,7 +22,8 @@ const REASONS: Record<string, string> = {
   model_file_missing: "Die konfigurierte Modelldatei fehlt.",
   model_file_invalid: "Der Modellpfad zeigt auf keine nicht-leere Datei.",
   model_file_unreadable: "Der Modellpfad konnte nicht zuverlässig geprüft werden.",
-  voice_unverified: "Voice lässt sich hier nicht zuverlässig prüfen. Es wurde kein Audio gestartet."
+  voice_unverified: "Voice lässt sich hier nicht zuverlässig prüfen. Es wurde kein Audio gestartet.",
+  voice_verified_during_setup: "Diese Stimme wurde bei der Einrichtung erfolgreich synthetisiert und ausgegeben."
 };
 const COMPONENT_LABELS = { available: "Vorhanden", missing: "Fehlt", unreachable: "Nicht erreichbar", unknown: "Ungeprüft", error: "Prüfung fehlgeschlagen" };
 

@@ -1,0 +1,15 @@
+@media (prefers-reduced-motion: no-preference) {
+  .activation-copy, .activation-capabilities, .guided-installer, .panel, .message:not(.draft), .command-palette, .catalog-card, .installation-progress {
+    animation: jarvis-arrive 380ms cubic-bezier(.2,.7,.2,1) both;
+  }
+  .activation-capabilities { animation-delay: 80ms; }
+  .guided-installer { animation-delay: 140ms; }
+  .installation-choice, .catalog-card, .shell-navigation button, button, input, select {
+    transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  }
+  .installation-choice:focus-within { transform: translateY(-2px); }
+  button:not(:disabled):active { transform: translateY(1px) scale(.98); }
+  .installation-progress[data-status="running"] { animation: jarvis-arrive 300ms ease both, jarvis-working 2.4s ease-in-out infinite; }
+}
+@keyframes jarvis-arrive { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
+@keyframes jarvis-working { 50% { box-shadow: 0 0 22px #6edbe714; } }
