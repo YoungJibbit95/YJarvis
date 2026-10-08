@@ -1,4 +1,4 @@
-"""YJ2-01 isolation gate; retire the legacy-import gate only in approved wiring work."""
+"""Domain isolation and the sole, unwired YJ2-05C1 runtime consumer."""
 
 import ast
 import importlib.util
@@ -13,6 +13,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 AGENT_PACKAGE = ROOT / "apps" / "agent" / "jarvis_agent"
 DOMAIN = AGENT_PACKAGE / "domain"
+TOOL_RUNTIME = AGENT_PACKAGE / "tool_runtime.py"
 
 
 def test_domain_imports_only_stdlib_pydantic_and_itself():
@@ -33,24 +34,46 @@ def test_domain_imports_only_stdlib_pydantic_and_itself():
                 assert root in sys.stdlib_module_names or root == "pydantic" or name == "jarvis_agent.domain" or name.startswith("jarvis_agent.domain."), (path, name)
 
 
-def test_legacy_runtime_has_no_domain_imports_yet():
+def imported_names(path):
+    package = ".".join(path.relative_to(AGENT_PACKAGE.parent).parts[:-1])
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            yield from (alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            name = node.module or ""
+            if node.level:
+                name = importlib.util.resolve_name("." * node.level + name, package)
+            yield name
+            yield from (f"{name}.{alias.name}" for alias in node.names)
+
+
+def test_legacy_runtime_has_no_domain_or_tool_runtime_imports():
     # Ensure this test inspects a full repository, not a partial contract checkout.
     assert (AGENT_PACKAGE / "agent_service.py").is_file()
     for path in sorted(AGENT_PACKAGE.rglob("*.py")):
-        if DOMAIN in path.parents:
+        if DOMAIN in path.parents or path == TOOL_RUNTIME:
             continue
-        package = ".".join(path.relative_to(AGENT_PACKAGE.parent).parts[:-1])
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.Import):
-                names = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom):
-                name = node.module or ""
-                if node.level:
-                    name = importlib.util.resolve_name("." * node.level + name, package)
-                names = [name, *[f"{name}.{alias.name}" for alias in node.names]]
-            else:
-                continue
-            assert not any(name == "jarvis_agent.domain" or name.startswith("jarvis_agent.domain.") for name in names), path
+        for name in imported_names(path):
+            assert not any(name == forbidden or name.startswith(forbidden + ".")
+                           for forbidden in ("jarvis_agent.domain", "jarvis_agent.tool_runtime")), (path, name)
+
+
+def test_tool_runtime_imports_only_its_exact_contract_and_semantic_catalog_dependencies():
+    assert TOOL_RUNTIME.is_file()
+    allowed = {
+        "__future__", "__future__.annotations", "typing", "typing.Protocol",
+        "pydantic", "pydantic.BaseModel",
+        "jarvis_agent.domain.action", "jarvis_agent.domain.action.CapabilityName",
+        "jarvis_agent.domain.capability_catalog",
+        "jarvis_agent.domain.capability_catalog.CAPABILITY_CATALOG",
+    }
+    assert set(imported_names(TOOL_RUNTIME)) <= allowed
+    # No legacy view access via an attribute, name or dynamic string lookup either.
+    for node in ast.walk(ast.parse(TOOL_RUNTIME.read_text(encoding="utf-8"))):
+        value = (node.id if isinstance(node, ast.Name) else
+                 node.attr if isinstance(node, ast.Attribute) else
+                 node.value if isinstance(node, ast.Constant) else None)
+        assert not (isinstance(value, str) and value.startswith("LEGACY_")), value
 
 
 def run_domain_probe(tmp_path, side_effect=""):
@@ -136,6 +159,50 @@ def run_domain_probe(tmp_path, side_effect=""):
 
 def test_import_and_validation_do_not_access_runtime_services(tmp_path):
     result = run_domain_probe(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "isolated-domain-ok"
+
+
+def test_tool_runtime_cold_import_and_fake_invocation_have_no_runtime_side_effects(tmp_path):
+    # Reuse the unchanged audit guard, installed before ANY domain/kernel import.
+    # A synchronous fake coroutine needs no event-loop socket pair on Windows.
+    program = textwrap.dedent('''
+        from jarvis_agent.tool_runtime import ToolRuntime
+
+        class FakeProvider:
+            calls = 0
+
+            async def execute(self, capability, input_data):
+                self.calls += 1
+                assert type(input_data) is CAPABILITY_CATALOG[capability].input_model
+                return output_data
+
+        provider = FakeProvider()
+        runtime = ToolRuntime(provider)
+
+        async def invoke_all():
+            for name, capability in LEGACY_TOOL_TO_CAPABILITY.items():
+                global output_data
+                output_data = outputs[name]["data"]
+                result = await runtime.execute(capability, inputs[name])
+                assert type(result) is CAPABILITY_CATALOG[capability].output_model
+
+        invocation = invoke_all()
+        try:
+            invocation.send(None)
+        except StopIteration:
+            pass
+        else:
+            raise AssertionError("Fake provider unexpectedly suspended")
+        finally:
+            invocation.close()
+        assert provider.calls == 18
+        unexpected = [name for name in sys.modules if name.startswith("jarvis_agent.")
+                      and name not in {"jarvis_agent.domain", "jarvis_agent.tool_runtime"}
+                      and not name.startswith("jarvis_agent.domain.")]
+        assert not unexpected, unexpected
+    ''')
+    result = run_domain_probe(tmp_path, program)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "isolated-domain-ok"
 
