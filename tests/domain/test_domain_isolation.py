@@ -75,14 +75,17 @@ def run_domain_probe(tmp_path, side_effect=""):
         sys.addaudithook(forbid_runtime_access)
         from jarvis_agent.domain import Action, ActionPlan, Observation, PlannedAction, PolicyDecision, Turn
         from jarvis_agent.domain import ToolSpecV2
-        from jarvis_agent.domain.capability_catalog import LEGACY_TOOL_CATALOG
+        from jarvis_agent.domain.capability_catalog import CAPABILITY_CATALOG, LEGACY_TOOL_CATALOG, LEGACY_TOOL_TO_CAPABILITY
         import json
         inputs = json.loads(sys.argv[2])
         outputs = json.loads(sys.argv[3])
-        assert len(LEGACY_TOOL_CATALOG) == 18
+        assert len(CAPABILITY_CATALOG) == len(LEGACY_TOOL_CATALOG) == len(LEGACY_TOOL_TO_CAPABILITY) == 18
+        assert set(CAPABILITY_CATALOG) == set(LEGACY_TOOL_TO_CAPABILITY.values())
         assert inputs.keys() == LEGACY_TOOL_CATALOG.keys()
         assert outputs.keys() == LEGACY_TOOL_CATALOG.keys()
-        for name, spec in LEGACY_TOOL_CATALOG.items():
+        for name, capability in LEGACY_TOOL_TO_CAPABILITY.items():
+            spec = CAPABILITY_CATALOG[capability]
+            assert spec is LEGACY_TOOL_CATALOG[name]
             assert ToolSpecV2.model_validate(spec.model_dump()) == spec
             payload = spec.input_model.model_validate(inputs[name])
             assert spec.input_model.model_validate(payload) == payload
