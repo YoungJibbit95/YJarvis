@@ -29,6 +29,7 @@ from .schemas import (
     TranscriptionResponse,
 )
 from .smarthome import HomeAssistantStubProvider
+from .setup_api import create_setup_router
 from .tools import ToolRegistry
 
 config = load_config()
@@ -50,6 +51,7 @@ agent_service = AgentService(
 smarthome_provider = HomeAssistantStubProvider(database)
 
 app = FastAPI(title="Jarvis Local Agent", version="0.1.0")
+app.include_router(create_setup_router(database.get_settings, config.default_whisper_model))
 
 app.add_middleware(
     CORSMiddleware,

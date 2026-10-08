@@ -1,4 +1,5 @@
 import type { Approval, JarvisSettings, SmartHomeEntity } from "@jarvis/shared-types";
+import { parseSetupStatus, type SetupStatus } from "./setup/types";
 
 const AGENT_HOST = import.meta.env.VITE_JARVIS_AGENT_HOST || "127.0.0.1";
 const AGENT_PORT = import.meta.env.VITE_JARVIS_AGENT_PORT || "8787";
@@ -59,18 +60,20 @@ function sleep(ms: number) {
   });
 }
 
-export async function waitForBackend(maxWaitMs = 30_000): Promise<void> {
+export async function waitForBackend(maxWaitMs = 30_000, signal?: AbortSignal): Promise<void> {
   const deadline = Date.now() + maxWaitMs;
   let lastError = "unbekannter Fehler";
 
   while (Date.now() < deadline) {
+    signal?.throwIfAborted();
     try {
-      const response = await fetch(`${API_BASE}/health`, { cache: "no-store" });
+      const response = await fetch(`${API_BASE}/health`, { cache: "no-store", signal });
       if (response.ok) {
         return;
       }
       lastError = `HTTP ${response.status}`;
     } catch (error) {
+      signal?.throwIfAborted();
       lastError = (error as Error).message;
     }
 
@@ -78,6 +81,12 @@ export async function waitForBackend(maxWaitMs = 30_000): Promise<void> {
   }
 
   throw new Error(`Backend nicht erreichbar (${lastError}). Bitte Agent-Start prüfen.`);
+}
+
+export async function fetchSetupStatus(signal: AbortSignal): Promise<SetupStatus> {
+  const response = await fetch(`${API_BASE}/v1/setup/status`, { cache: "no-store", signal });
+  if (!response.ok) throw new Error("Setup inspection failed");
+  return parseSetupStatus(await response.json());
 }
 
 export async function createSession(): Promise<{ session_id: string }> {
