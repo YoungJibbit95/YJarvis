@@ -102,7 +102,8 @@ a separate reviewed step before a broadly distributed release.
 
 ## Window chrome and endpoint check
 
-The native Electron menu is removed. Desktop windows use a draggable custom
+The native in-window Electron menu is removed on Windows/Linux; macOS retains
+its system app menu, including Quit. Desktop windows use a draggable custom
 titlebar with accessible close/minimize/maximize controls styled as macOS traffic
 lights. Double-clicking the titlebar toggles maximization. The preload exposes
 only those three commands; main accepts them only from the trusted top-level

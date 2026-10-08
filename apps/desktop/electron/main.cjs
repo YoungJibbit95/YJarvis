@@ -10,7 +10,8 @@ protocol.registerSchemesAsPrivileged([{
   scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
 }]);
 
-Menu.setApplicationMenu(null);
+// macOS has a system app menu (including Quit), rather than an in-window menu.
+if (process.platform !== "darwin") Menu.setApplicationMenu(null);
 ipcMain.on("jarvis:window-control", (event, action) => {
   const frame = event.senderFrame;
   if (!frame || frame !== event.sender.mainFrame) return;
