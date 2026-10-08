@@ -314,3 +314,13 @@ no database migration and does not run the profile-regeneration script. Review
 profile rather than serving as a required CI/bootstrap command. Database backups
 should be made with the application stopped or with SQLite's backup facilities.
 Reverting the infrastructure PR must not delete personal runtime data.
+
+## Documentation and wiki
+
+The [wiki source guide](wiki/README.md) defines the German technical documentation,
+editorial source provenance, commit ledger and reviewed publication process.
+Edit `docs/wiki/pages` through a documentation PR; do not change generated pages
+in the live wiki. The original `Home` and `YJarvis-Documentation-and-Wiki` entry
+pages are preserved. The publisher runs after reviewed changes reach `main`;
+each build includes the complete reachable commit history. No runtime behavior
+or roadmap authorization is changed by this documentation foundation.
