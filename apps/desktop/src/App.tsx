@@ -1,5 +1,4 @@
 import {
-  CSSProperties,
   FormEvent,
   memo,
   useCallback,
@@ -28,6 +27,8 @@ import {
   type ChatMessage
 } from "./api";
 import { AppShell, type TabId } from "./app/AppShell";
+import { PresenceStage, runStateLabel } from "./app/PresenceStage";
+import { ActionReview } from "./app/ActionReview";
 import { SetupNotice } from "./setup/SetupStatusView";
 import type { SetupCheck } from "./setup/types";
 
@@ -119,11 +120,6 @@ const QUICK_ACTIONS: Array<{ label: string; prompt: string }> = [
     prompt: "Jarvis, plane morgen um 10 Uhr einen Termin mit dem Titel Projekt-Review fuer 30 Minuten."
   }
 ];
-const ORB_PARTICLE_KEYS = Array.from({ length: 14 }, (_, index) => index);
-
-function formatJson(value: Record<string, unknown>) {
-  return JSON.stringify(value, null, 2);
-}
 
 function uniqueMessageId() {
   return Date.now() + Math.floor(Math.random() * 1000);
@@ -312,7 +308,7 @@ const DraftBubble = memo(function DraftBubble({ draft }: { draft: DraftMessage }
     <article className="message assistant draft">
       <header>
         <span className="role-tag">Jarvis</span>
-        <time>stream</time>
+        <time>Antwort entsteht</time>
       </header>
       <p>{draft.content || "..."}</p>
     </article>
@@ -323,11 +319,10 @@ const TimelineRow = memo(function TimelineRow({ item }: { item: TimelineEntry })
   return (
     <li>
       <div>
-        <strong className={`state-badge state-${item.state}`}>{item.state}</strong>
-        <span>{item.runId.slice(0, 8)}</span>
+        <strong className={`state-badge state-${item.state}`}>{runStateLabel(item.state)}</strong>
       </div>
-      <p>{item.detail || "-"}</p>
       <time>{new Date(item.timestamp).toLocaleTimeString()}</time>
+      <details className="technical-details"><summary>Ereignisdetails</summary><p>{item.detail || "Keine weiteren Angaben."}</p><code>{item.state} · {item.runId}</code></details>
     </li>
   );
 });
@@ -347,12 +342,25 @@ const CommandPalette = memo(function CommandPalette({
   onClose: () => void;
   onRun: (item: CommandItem) => void;
 }) {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement;
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    dialog?.querySelector<HTMLInputElement>("input")?.focus();
+    return () => {
+      dialog?.close();
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, [open]);
+
   if (!open) {
     return null;
   }
 
   return (
-    <div className="command-palette-overlay" onClick={onClose}>
+    <dialog ref={dialogRef} className="command-palette-overlay" aria-label="Jarvis Kommandos" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div
         className="command-palette"
         onClick={(event) => {
@@ -360,14 +368,14 @@ const CommandPalette = memo(function CommandPalette({
         }}
       >
         <header>
-          <h3>Mission Command</h3>
-          <p>Cmd/Ctrl + K</p>
+          <div><p className="eyebrow">Direkt zu deinem nächsten Schritt</p><h3>Jarvis Kommandos</h3></div>
+          <button type="button" className="secondary" onClick={onClose} aria-label="Kommandos schließen">Esc</button>
         </header>
         <input
-          autoFocus
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Suche Aktionen, Navigation, Voice..."
+          aria-label="Kommandos durchsuchen"
+          placeholder="Aktion, Arbeitsbereich oder Sprachmodus …"
         />
         <ul>
           {items.map((item) => (
@@ -388,7 +396,7 @@ const CommandPalette = memo(function CommandPalette({
           {items.length === 0 ? <li className="empty">Keine Treffer.</li> : null}
         </ul>
       </div>
-    </div>
+    </dialog>
   );
 });
 
@@ -1151,38 +1159,38 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       ...quickActionItems,
       {
         id: "nav-chat",
-        label: "Go: Chat",
+        label: "Chat öffnen",
         hint: "Zur Chat-Ansicht wechseln",
-        keywords: ["nav", "chat", "konversation"],
+        keywords: ["nav", "chat", "konversation", "go: chat"],
         run: () => switchTab("chat")
       },
       {
         id: "nav-approvals",
-        label: "Go: Approvals",
+        label: "Freigaben ansehen",
         hint: "Offene Freigaben anzeigen",
-        keywords: ["nav", "approvals", "freigaben"],
+        keywords: ["nav", "approvals", "freigaben", "go: approvals"],
         run: () => switchTab("approvals")
       },
       {
         id: "nav-settings",
-        label: "Go: Settings",
+        label: "Einstellungen öffnen",
         hint: "Agent-Konfiguration öffnen",
-        keywords: ["nav", "settings", "config", "einstellungen"],
+        keywords: ["nav", "settings", "config", "einstellungen", "go: settings"],
         run: () => switchTab("settings")
       },
       {
         id: "nav-smarthome",
-        label: "Go: Smart Home",
-        hint: "Smart-Home Template öffnen",
-        keywords: ["nav", "smarthome", "template"],
+        label: "Smart Home öffnen",
+        hint: "Smart-Home-Vorlage öffnen",
+        keywords: ["nav", "smarthome", "template", "go: smart home"],
         run: () => switchTab("smarthome")
       },
       {
         id: "toggle-voice-input",
         disabled: !chatAvailable && !voiceModeEnabled,
-        label: voiceModeEnabled ? "Voice Input: Stop" : "Voice Input: Start",
+        label: voiceModeEnabled ? "Sprachmodus stoppen" : "Sprachmodus starten",
         hint: voiceModeEnabled ? "Sprachmodus deaktivieren" : "Sprachmodus aktivieren",
-        keywords: ["voice", "mic", "input", voiceModeEnabled ? "stop" : "start"],
+        keywords: ["voice", "mic", "input", voiceModeEnabled ? "voice input: stop" : "voice input: start"],
         run: () => {
           if (voiceModeEnabled) {
             stopVoiceMode();
@@ -1193,9 +1201,9 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       },
       {
         id: "toggle-voice-replies",
-        label: voiceRepliesEnabled ? "Replies: Text only" : "Replies: Voice + Text",
+        label: voiceRepliesEnabled ? "Nur Textantworten" : "Sprache und Text",
         hint: "Antwortmodus umschalten",
-        keywords: ["voice", "reply", "tts", "toggle", "text only"],
+        keywords: ["voice", "reply", "tts", "toggle", "text only", "replies: text only", "replies: voice + text"],
         run: () => setVoiceRepliesEnabled((previous) => !previous)
       }
     ];
@@ -1548,50 +1556,19 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
   }
 
   function renderChatTab() {
-    const assistantModeLabel =
-      assistantMode === "speaking" ? "Speaking" : assistantMode === "thinking" ? "Thinking" : "Idle";
-
     return (
       <div className="chat-grid">
         <section className="panel chat-panel">
           <header className="panel-header">
-            <h2>Konversation</h2>
-            <p>{status}</p>
+            <div><p className="eyebrow">Dein Raum für Gedanken</p><h2>Im Gespräch mit Jarvis</h2></div>
+            <details className="connection-details"><summary>Verbindung & Hinweise</summary><p>{status}</p></details>
           </header>
 
           <div className="conversation-viewport">
-            <div className={`conversation-orb ${assistantMode}`} aria-hidden="true">
-              <div className="conversation-orb-aurora" />
-              <div className="conversation-orb-grid" />
-              <div className="conversation-orb-rings">
-                <span />
-                <span />
-                <span />
-                <span />
-              </div>
-              <div className="conversation-orb-core-shell">
-                <div className="conversation-orb-core" />
-                <div className="conversation-orb-core-glint" />
-              </div>
-              <div className="conversation-orb-wave">
-                <span />
-                <span />
-                <span />
-                <span />
-                <span />
-              </div>
-              <div className="conversation-orb-particles">
-                {ORB_PARTICLE_KEYS.map((particleIndex) => (
-                  <span
-                    key={particleIndex}
-                    style={{ "--particle-index": particleIndex } as CSSProperties}
-                  />
-                ))}
-              </div>
-              <small>{assistantModeLabel}</small>
-            </div>
+            <PresenceStage mode={assistantMode} microphoneActive={voiceModeEnabled} latestEvent={timeline[0]} />
 
-            <div className="messages">
+            <div className="messages" aria-label="Nachrichten">
+              {!sortedMessages.length && !draftMessages.length ? <div className="conversation-empty"><span className="eyebrow">Ein Gedanke. Ein Anfang.</span><h3>Was beschäftigt dich?</h3><p>{chatAvailable ? "Eine Idee ordnen, den Tag planen oder etwas Neues verstehen. Fang einfach an." : "Schau dich in Ruhe um. Sobald ein Chat-Modell bestätigt ist, beginnt hier dein Gespräch mit Jarvis."}</p></div> : null}
               {sortedMessages.map((message) => (
                 <MessageBubble key={message.id} message={message} onSpeak={handleSpeakMessage} />
               ))}
@@ -1604,7 +1581,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
 
           <form className="composer" onSubmit={onSubmit}>
             <div className="quick-actions">
-              <p>Quick Actions</p>
+              <p className="visually-hidden">Schnelle Aufgaben</p>
               <div className="quick-actions-grid">
                 {QUICK_ACTIONS.map((action) => (
                   <button
@@ -1620,7 +1597,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
                   </button>
                 ))}
               </div>
-              <small>Voice-Modus reagiert nur auf Saetze, die mit `Jarvis ...` beginnen.</small>
+              <small>Sprich Jarvis im Sprachmodus mit „Jarvis …“ an.</small>
             </div>
 
             <textarea
@@ -1629,8 +1606,8 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
               ref={composerInputRef}
               value={input}
               onChange={(event) => setInput(event.target.value)}
-              placeholder="Schreibe eine Aufgabe an Jarvis oder nutze den Sprachmodus..."
-              rows={3}
+              placeholder="Was möchtest du gemeinsam angehen?"
+              rows={2}
             />
             <div className="actions">
               <button
@@ -1653,7 +1630,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
                 className={voiceRepliesEnabled ? "" : "secondary"}
                 onClick={() => setVoiceRepliesEnabled((previous) => !previous)}
               >
-                {voiceRepliesEnabled ? "Antwort: Sprache" : "Text only"}
+                {voiceRepliesEnabled ? "Antwort: Sprache" : "Antwort: Text"}
               </button>
 
               <button type="submit" disabled={busy || !sessionId || !chatAvailable}>
@@ -1663,19 +1640,15 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
           </form>
         </section>
 
-        <section className="panel timeline">
-          <header className="panel-header">
-            <h2>Aktivität</h2>
-            <p>Live Run-States des Agenten</p>
-          </header>
-
+        <details className="timeline">
+          <summary>Verlauf & Ereignisse <span>{deferredTimeline.length}</span></summary>
           <ul>
             {deferredTimeline.map((item) => (
               <TimelineRow key={item.id} item={item} />
             ))}
             {!deferredTimeline.length ? <li className="empty">Noch keine Aktivität</li> : null}
           </ul>
-        </section>
+        </details>
       </div>
     );
   }
@@ -1685,22 +1658,14 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       <section className="panel approvals">
         <header className="panel-header">
           <h2>Freigaben</h2>
-          <p>Jede Aktion benötigt explizite Zustimmung.</p>
+          <p>Diese angefragten Aktionen warten auf deine Entscheidung.</p>
         </header>
 
         <div className="panel-scroll approvals-scroll">
           {!approvals.length ? <p className="empty">Keine offenen Freigaben.</p> : null}
 
           {approvals.map((approval) => (
-            <article key={approval.id} className="approval-card">
-              <h3>{approval.tool_name}</h3>
-              <p>Run: {approval.run_id}</p>
-              <pre>{formatJson(approval.tool_input)}</pre>
-              <div className="approval-actions">
-                <button onClick={() => handleApproval(approval.id, "approve")}>Approve</button>
-                <button className="secondary" onClick={() => handleApproval(approval.id, "deny")}>Deny</button>
-              </div>
-            </article>
+            <ActionReview key={approval.id} approval={approval} onDecide={handleApproval} />
           ))}
         </div>
       </section>
@@ -1715,144 +1680,173 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     return (
       <section className="panel settings">
         <header className="panel-header">
-          <h2>Settings</h2>
-          <p>Lokal persistiert in SQLite.</p>
+          <div><p className="eyebrow">Dein Jarvis, deine Einstellungen</p><h2>Einstellungen</h2></div>
+          <p>Änderungen gelten erst nach dem Speichern.</p>
         </header>
 
         <div className="panel-scroll settings-scroll">
-          <div className="form-grid">
-            <label>
-              Modell
-              <input
-                value={settingsDraft.model_name}
-                onChange={(event) => setSettingsDraft((previous) => ({ ...previous, model_name: event.target.value }))}
-              />
-            </label>
+          <section className="settings-section">
+            <header><h3>Allgemein</h3><p>Die Sprache deines Assistenten.</p></header>
+            <div>
+              <div className="form-grid">
+                <label>
+                  Sprache
+                  <input
+                    value={settingsDraft.language}
+                    onChange={(event) => setSettingsDraft((previous) => ({ ...previous, language: event.target.value }))}
+                  />
+                </label>
+              </div>
+            </div>
+          </section>
 
-            <label>
-              Sprache
-              <input
-                value={settingsDraft.language}
-                onChange={(event) => setSettingsDraft((previous) => ({ ...previous, language: event.target.value }))}
-              />
-            </label>
+          <section className="settings-section">
+            <header><h3>Modelle</h3><p>Das konfigurierte Chat-Modell und seine lokale Verbindung.</p></header>
+            <div>
+              <div className="form-grid">
+                <label>
+                  Modell
+                  <input
+                    value={settingsDraft.model_name}
+                    onChange={(event) => setSettingsDraft((previous) => ({ ...previous, model_name: event.target.value }))}
+                  />
+                </label>
+              </div>
+              <details className="technical-details">
+                <summary>Modell-Verbindung und Dateien</summary>
+                <div className="form-grid">
+                  <label>
+                    Ollama URL
+                    <input
+                      value={settingsDraft.ollama_base_url}
+                      onChange={(event) => setSettingsDraft((previous) => ({ ...previous, ollama_base_url: event.target.value }))}
+                    />
+                  </label>
 
-            <label>
-              Ollama URL
-              <input
-                value={settingsDraft.ollama_base_url}
-                onChange={(event) => setSettingsDraft((previous) => ({ ...previous, ollama_base_url: event.target.value }))}
-              />
-            </label>
+                  <label>
+                    Whisper Modellpfad
+                    <input
+                      value={settingsDraft.whisper_model_path}
+                      onChange={(event) => setSettingsDraft((previous) => ({ ...previous, whisper_model_path: event.target.value }))}
+                    />
+                  </label>
 
-            <label>
-              TTS Engine
-              <input
-                value={settingsDraft.tts_engine}
-                onChange={(event) => setSettingsDraft((previous) => ({ ...previous, tts_engine: event.target.value }))}
-              />
-            </label>
-
-            <label>
-              Piper Modellpfad
-              <input
-                value={settingsDraft.tts_model_path}
-                onChange={(event) => setSettingsDraft((previous) => ({ ...previous, tts_model_path: event.target.value }))}
-              />
-            </label>
-
-            <label>
-              TTS Voice
-              {isSayEngine ? (
-                <div className="tts-voice-row">
-                  <select
-                    value={settingsDraft.tts_voice}
-                    onChange={(event) =>
-                      setSettingsDraft((previous) => ({ ...previous, tts_voice: event.target.value }))
-                    }
-                  >
-                    {currentVoiceMissingFromList ? (
-                      <option value={settingsDraft.tts_voice}>
-                        {settingsDraft.tts_voice} (aktuell)
-                      </option>
-                    ) : null}
-                    {sayVoices.map((voice) => (
-                      <option key={voice} value={voice}>
-                        {voice}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => {
-                      refreshAudioVoices().catch((error) => setStatus((error as Error).message));
-                    }}
-                  >
-                    Neu laden
-                  </button>
+                  <label>
+                    Whisper Binary
+                    <input
+                      value={settingsDraft.whisper_binary}
+                      onChange={(event) => setSettingsDraft((previous) => ({ ...previous, whisper_binary: event.target.value }))}
+                    />
+                  </label>
                 </div>
-              ) : (
-                <input
-                  value={settingsDraft.tts_voice}
-                  onChange={(event) => setSettingsDraft((previous) => ({ ...previous, tts_voice: event.target.value }))}
-                />
-              )}
-            </label>
+              </details>
+            </div>
+          </section>
 
-            <label>
-              say Rate (WPM)
-              <input
-                type="number"
-                min={80}
-                max={420}
-                value={settingsDraft.say_rate_wpm}
-                onChange={(event) =>
-                  setSettingsDraft((previous) => ({
-                    ...previous,
-                    say_rate_wpm: Number.isFinite(Number(event.target.value))
-                      ? Number(event.target.value)
-                      : previous.say_rate_wpm
-                  }))
-                }
-              />
-            </label>
+          <section className="settings-section">
+            <header><h3>Stimme</h3><p>Stimme und Aussprache an deine Vorlieben anpassen.</p></header>
+            <div>
+              <div className="form-grid">
+                <label>
+                  TTS Voice
+                  {isSayEngine ? (
+                    <div className="tts-voice-row">
+                      <select
+                        value={settingsDraft.tts_voice}
+                        onChange={(event) =>
+                          setSettingsDraft((previous) => ({ ...previous, tts_voice: event.target.value }))
+                        }
+                      >
+                        {currentVoiceMissingFromList ? (
+                          <option value={settingsDraft.tts_voice}>
+                            {settingsDraft.tts_voice} (aktuell)
+                          </option>
+                        ) : null}
+                        {sayVoices.map((voice) => (
+                          <option key={voice} value={voice}>
+                            {voice}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => {
+                          refreshAudioVoices().catch((error) => setStatus((error as Error).message));
+                        }}
+                      >
+                        Neu laden
+                      </button>
+                    </div>
+                  ) : (
+                    <input
+                      value={settingsDraft.tts_voice}
+                      onChange={(event) => setSettingsDraft((previous) => ({ ...previous, tts_voice: event.target.value }))}
+                    />
+                  )}
+                </label>
 
-            <label>
-              Sir Aussprache (TTS)
-              <input
-                value={settingsDraft.tts_sir_pronunciation}
-                onChange={(event) =>
-                  setSettingsDraft((previous) => ({ ...previous, tts_sir_pronunciation: event.target.value }))
-                }
-                placeholder="Sör"
-              />
-            </label>
+                <label>
+                  say Rate (WPM)
+                  <input
+                    type="number"
+                    min={80}
+                    max={420}
+                    value={settingsDraft.say_rate_wpm}
+                    onChange={(event) =>
+                      setSettingsDraft((previous) => ({
+                        ...previous,
+                        say_rate_wpm: Number.isFinite(Number(event.target.value))
+                          ? Number(event.target.value)
+                          : previous.say_rate_wpm
+                      }))
+                    }
+                  />
+                </label>
 
-            <label>
-              Whisper Modellpfad
-              <input
-                value={settingsDraft.whisper_model_path}
-                onChange={(event) => setSettingsDraft((previous) => ({ ...previous, whisper_model_path: event.target.value }))}
-              />
-            </label>
+                <label>
+                  Sir Aussprache (TTS)
+                  <input
+                    value={settingsDraft.tts_sir_pronunciation}
+                    onChange={(event) =>
+                      setSettingsDraft((previous) => ({ ...previous, tts_sir_pronunciation: event.target.value }))
+                    }
+                    placeholder="Sör"
+                  />
+                </label>
+              </div>
+              <details className="technical-details">
+                <summary>Sprachausgabe · Backend und Datei</summary>
+                <div className="form-grid">
+                  <label>
+                    TTS Engine
+                    <input
+                      value={settingsDraft.tts_engine}
+                      onChange={(event) => setSettingsDraft((previous) => ({ ...previous, tts_engine: event.target.value }))}
+                    />
+                  </label>
 
-            <label>
-              Whisper Binary
-              <input
-                value={settingsDraft.whisper_binary}
-                onChange={(event) => setSettingsDraft((previous) => ({ ...previous, whisper_binary: event.target.value }))}
-              />
-            </label>
-          </div>
+                  <label>
+                    Piper Modellpfad
+                    <input
+                      value={settingsDraft.tts_model_path}
+                      onChange={(event) => setSettingsDraft((previous) => ({ ...previous, tts_model_path: event.target.value }))}
+                    />
+                  </label>
+                </div>
+              </details>
+            </div>
+          </section>
 
-          <div className="allowlist">
-            <h3>Allowed Paths</h3>
+          <div className="allowlist settings-section">
+            <header><h3>Dateizugriff</h3><p>Erlaubte Pfade bleiben sichtbar und unter deiner Kontrolle.</p></header>
+            <div>
             <div className="allowlist-add">
               <input
                 value={allowlistInput}
                 onChange={(event) => setAllowlistInput(event.target.value)}
-                placeholder="/Users/.../Dokumente"
+                aria-label="Erlaubten Pfad hinzufügen"
+                placeholder="Vollständiger Pfad zu einem erlaubten Ordner"
               />
               <button onClick={addAllowlistPath}>Hinzufügen</button>
             </div>
@@ -1868,6 +1862,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
               ))}
               {!settingsDraft.allowed_paths.length ? <li className="empty">Keine Allowlist-Pfade gesetzt.</li> : null}
             </ul>
+            </div>
           </div>
         </div>
 
@@ -1883,7 +1878,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     return (
       <section className="panel smarthome">
         <header className="panel-header">
-          <h2>Smart Home (Template)</h2>
+          <h2>Smart Home · Vorlage</h2>
           <p>Stub-Provider für spätere Home Assistant Integration.</p>
         </header>
 

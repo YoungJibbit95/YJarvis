@@ -21,7 +21,7 @@ export function AcceleratorProfileContent({ state, onRetry }: { state: Accelerat
   if (state.profile.adapters.length === 0) return <p>Windows meldet keine Grafikadapter.</p>;
   return <>
     <ul className="accelerator-list">
-      {state.profile.adapters.map((adapter, index) => <li key={index}>
+      {state.profile.adapters.map((adapter, index) => <li key={index} data-classification={adapter.classification}>
         <h4>{adapter.display_name}</h4>
         <p>{CLASSIFICATIONS[adapter.classification]}</p>
         <dl className="hardware-facts">

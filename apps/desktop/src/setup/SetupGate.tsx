@@ -6,6 +6,7 @@ import { SETUP_LABELS, SetupStatusView } from "./SetupStatusView";
 import type { SetupCheck } from "./types";
 import { ModelCatalogBrowser } from "./ModelCatalogBrowser";
 import { HardwareProfileView } from "./HardwareProfileView";
+import { PresenceCore } from "../app/PresenceStage";
 
 export function SetupGate() {
   const [check, setCheck] = useState<SetupCheck>({ state: "checking", backendReachable: false });
@@ -50,23 +51,32 @@ export function SetupGate() {
     <div className="setup-screen" data-setup-state={check.state}>
       <AppHeader />
       <main className="setup-first-run" aria-labelledby="setup-title" aria-busy={check.state === "checking"}>
-        <p className="setup-eyebrow">DEIN LOKALER ASSISTENT</p>
-        <h2 id="setup-title">{check.state === "needs_setup" ? "Ein guter Anfang für Jarvis." : SETUP_LABELS[check.state]}</h2>
-        <p className="setup-intro" role="status">{check.state === "needs_setup"
-          ? "Jarvis braucht noch lokale AI-Komponenten. Hier siehst du, was vorhanden ist und was noch fehlt."
-          : check.state === "error" ? "Es gibt noch kein verlässliches Ergebnis. Du kannst die Verbindung prüfen und es erneut versuchen."
-          : "Jarvis liest die vorhandene Konfiguration und prüft deinen Modell-Endpunkt."}</p>
-        <SetupStatusView check={check} />
-        <div className="setup-explanation">
-          <h3>Deine Einrichtung bleibt unter deiner Kontrolle.</h3>
+        <div className="activation-hero">
+          <div className="activation-presence" aria-hidden="true">
+            <PresenceCore mode={check.state === "checking" ? "thinking" : "idle"} />
+          </div>
+          <div className="activation-copy">
+            <p className="eyebrow">Dein persönlicher Assistent · Einrichtung</p>
+            <h2 id="setup-title">{check.state === "needs_setup" ? <>Dein Jarvis.<br /><span>Dein nächster Schritt.</span></> : SETUP_LABELS[check.state]}</h2>
+            <p className="setup-intro" role="status">{check.state === "needs_setup"
+              ? "Jarvis braucht noch lokale AI-Komponenten. Hier siehst du, was vorhanden ist und was noch fehlt."
+              : check.state === "error" ? "Es gibt noch kein verlässliches Ergebnis. Du kannst die Verbindung prüfen und es erneut versuchen."
+              : "Jarvis liest die vorhandene Konfiguration und prüft deinen Modell-Endpunkt."}</p>
+            <div className="setup-actions">
+              <button type="button" disabled={check.state === "checking"} onClick={() => void refresh()}>Erneut prüfen</button>
+              {check.backendReachable ? <button type="button" className="secondary" onClick={() => setEnteredApp(true)}>Später · App ansehen</button> : null}
+            </div>
+            <p className="setup-footnote">Ohne bestätigtes Chat-Modell bleibt der Chat gesperrt. Einstellungen und Freigaben bleiben in der App erreichbar.</p>
+          </div>
+        </div>
+        <div className="activation-capabilities">
+          <div className="section-heading"><p className="eyebrow">Was schon vorhanden ist</p><h3>Die Bausteine deines Assistenten</h3></div>
+          <SetupStatusView check={check} />
+        </div>
+        <details className="setup-explanation technical-details"><summary>Was wird bei der Einrichtung geprüft?</summary>
           <p>Diese Prüfung installiert nichts und ändert keine Einstellungen. Sie fragt nur den konfigurierten Modell-Endpunkt ab und prüft vorhandene Modellpfade.</p>
-          <p>Die geführte Modellinstallation folgt in einem späteren Schritt. Bis dahin kannst du die App ansehen und vorhandene Komponenten in Settings eintragen.</p>
-        </div>
-        <div className="setup-actions">
-          <button type="button" disabled={check.state === "checking"} onClick={() => void refresh()}>Erneut prüfen</button>
-          {check.backendReachable ? <button type="button" className="secondary" onClick={() => setEnteredApp(true)}>Später · App ansehen</button> : null}
-        </div>
-        <p className="setup-footnote">Ohne bestätigtes Chat-Modell bleibt der Chat gesperrt. Settings und Approvals bleiben in der App erreichbar.</p>
+          <p>Du kannst die App ansehen und vorhandene Komponenten in den Einstellungen eintragen. Eine geführte Modellinstallation ist hier noch nicht verfügbar.</p>
+        </details>
         <ModelCatalogBrowser />
         <HardwareProfileView />
       </main>

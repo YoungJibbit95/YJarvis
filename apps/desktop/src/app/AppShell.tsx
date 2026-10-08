@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { InterfaceIcon } from "./InterfaceIcon";
 
 export type TabId = "chat" | "approvals" | "settings" | "smarthome";
 
@@ -27,8 +28,8 @@ type AppShellProps = NavigationProps & {
 
 const NAVIGATION: ReadonlyArray<{ id: TabId; label: string }> = [
   { id: "chat", label: "Chat" },
-  { id: "approvals", label: "Approvals" },
-  { id: "settings", label: "Settings" },
+  { id: "approvals", label: "Freigaben" },
+  { id: "settings", label: "Einstellungen" },
   { id: "smarthome", label: "Smart Home" }
 ];
 
@@ -40,7 +41,7 @@ function GlobalCommandTrigger({ onOpen }: { onOpen: () => void }) {
       aria-keyshortcuts="Control+k Meta+k"
       onClick={onOpen}
     >
-      Command
+      Kommandos
       <kbd aria-hidden="true">Ctrl / ⌘ K</kbd>
     </button>
   );
@@ -50,10 +51,10 @@ export function AppHeader({ onOpenCommands }: { onOpenCommands?: () => void }) {
   return (
     <header className="shell-header">
       <div className="shell-identity">
-        <span className="shell-emblem" aria-hidden="true">Y</span>
+        <span className="shell-emblem" aria-hidden="true"><span /></span>
         <div>
           <h1>YJARVIS</h1>
-          <p>Dein persönlicher Assistent</p>
+          <p>Persönlich. Lokal. Unter deiner Kontrolle.</p>
         </div>
       </div>
       {onOpenCommands ? <GlobalCommandTrigger onOpen={onOpenCommands} /> : null}
@@ -76,9 +77,7 @@ function RuntimeStatus({ values }: { values: RuntimeValues }) {
   return (
     <details className="shell-runtime">
       <summary>
-        <span className="shell-runtime-label">Runtime-Status</span>
-        <span className="shell-runtime-core">Core: <strong>{values.core}</strong></span>
-        <span className="shell-runtime-model">Model: <strong>{values.model}</strong></span>
+        <span className="shell-runtime-label">Runtime-Diagnose</span>
       </summary>
       <dl className="shell-runtime-details">
         {details.map(([label, value]) => (
@@ -95,7 +94,7 @@ function RuntimeStatus({ values }: { values: RuntimeValues }) {
 function PrimaryNavigation({ activeTab, onNavigate }: NavigationProps) {
   return (
     <nav className="shell-navigation" aria-label="Hauptnavigation">
-      <p>Arbeitsbereiche</p>
+      <p>Dein Raum</p>
       <div className="shell-navigation-items">
         {NAVIGATION.map(({ id, label }) => (
           <button
@@ -107,7 +106,7 @@ function PrimaryNavigation({ activeTab, onNavigate }: NavigationProps) {
             aria-controls="shell-content"
             onClick={() => onNavigate(id)}
           >
-            {label}
+            <InterfaceIcon name={id} /><span>{label}</span>
           </button>
         ))}
       </div>

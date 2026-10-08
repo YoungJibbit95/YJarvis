@@ -16,7 +16,7 @@ const show = (value) => render({ status: "loaded", profile: parseAcceleratorProf
 test("multiple native adapters, software and memory semantics are informational", () => {
   const html = show({ status: "available", adapters: [adapter(), { ...adapter(), display_name: "Basic Render", classification: "software" }] });
   for (const text of ["Adapter α", "Basic Render", "Hardware-Adapter", "Software-Adapter", "8 GiB", "16 GiB", "Obergrenze", "kein zusätzlicher dedizierter Grafikspeicher"]) assert.ok(html.includes(text));
-  assert.equal((html.match(/<li>/g) || []).length, 2);
+  assert.equal((html.match(/<li\b/g) || []).length, 2);
   assert.ok(!/<button|<a\b|Empfohlen|Optimal|Schnell|Installieren|Herunterladen|Balanced|Qwen|Whisper|TOPS|CUDA/.test(html));
 });
 
