@@ -28,6 +28,7 @@ import {
 } from "./api";
 import { AppShell, type TabId } from "./app/AppShell";
 import { PresenceStage, runStateLabel } from "./app/PresenceStage";
+import { AppFeedback, type ConnectionState, type FailureKind, type Failures } from "./app/AppFeedback";
 import { ActionReview } from "./app/ActionReview";
 import { SetupNotice } from "./setup/SetupStatusView";
 import type { SetupCheck } from "./setup/types";
@@ -412,6 +413,22 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("Starte lokale Session...");
+  const [connection, setConnection] = useState<ConnectionState>({ phase: "starting" });
+  const [failures, setFailures] = useState<Failures>({});
+
+  function reportFailure(kind: FailureKind, title: string, error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    setStatus(message);
+    setFailures((previous) => ({ ...previous, [kind]: { title, message } }));
+  }
+
+  function dismissFailure(kind: FailureKind) {
+    setFailures((previous) => {
+      const next = { ...previous };
+      delete next[kind];
+      return next;
+    });
+  }
 
   const [approvals, setApprovals] = useState<Approval[]>([]);
 
@@ -575,7 +592,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       lastAssistantSpokenTextRef.current = nextChunk;
       await speak(nextChunk);
     } catch (error) {
-      setStatus((error as Error).message);
+      reportFailure("voice", "Sprachausgabe fehlgeschlagen", error);
     } finally {
       ttsPlaybackActiveRef.current = false;
       ttsQueueRunningRef.current = false;
@@ -718,7 +735,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     clearBusyWatchdog();
     busyWatchdogTimerRef.current = window.setTimeout(() => {
       releaseBusyLock();
-      setStatus("Antwort-Timeout erreicht, Sprachqueue wird fortgesetzt.");
+      reportFailure("chat", "Antwort-Timeout", "Antwort-Timeout erreicht, Sprachqueue wird fortgesetzt.");
     }, RUN_COMPLETION_TIMEOUT_MS);
   }
 
@@ -821,7 +838,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       return true;
     } catch (error) {
       releaseBusyLock();
-      setStatus((error as Error).message);
+      reportFailure("chat", "Nachricht konnte nicht gesendet werden", error);
       return false;
     }
   }
@@ -913,7 +930,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       setStatus(`Erkannt (${result.latency_ms} ms): ${wakeCommand}`);
       enqueueVoiceMessage(wakeCommand);
     } catch (error) {
-      setStatus((error as Error).message);
+      reportFailure("voice", "Spracherkennung fehlgeschlagen", error);
     }
   }
 
@@ -1104,7 +1121,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       setStatus("Sprachmodus aktiv: Sprechen und kurz pausieren zum automatischen Senden.");
     } catch (error) {
       stopVoiceModeInternal({ updateStatus: false });
-      setStatus((error as Error).message);
+      reportFailure("voice", "Sprachmodus konnte nicht gestartet werden", error);
     }
   }
 
@@ -1139,7 +1156,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
 
   const handleSpeakMessage = useCallback((content: string) => {
     void speakWithEchoGuard(content, { manual: true, interrupt: true }).catch((error) => {
-      setStatus((error as Error).message);
+      reportFailure("voice", "Sprachausgabe fehlgeschlagen", error);
     });
   }, []);
 
@@ -1307,10 +1324,10 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
         setSettings(initialSettings);
         setSettingsDraft(initialSettings);
         setEntities(initialEntities);
-        refreshAudioVoices().catch((error) => setStatus((error as Error).message));
+        refreshAudioVoices().catch((error) => reportFailure("voice", "Stimmen konnten nicht geladen werden", error));
       } catch (error) {
         if (!cancelled) {
-          setStatus((error as Error).message);
+          reportFailure("session", "Session konnte nicht vollständig geladen werden", error);
         }
       }
     }
@@ -1337,7 +1354,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     if (sayVoices.length > 0) {
       return;
     }
-    refreshAudioVoices().catch((error) => setStatus((error as Error).message));
+    refreshAudioVoices().catch((error) => reportFailure("voice", "Stimmen konnten nicht geladen werden", error));
   }, [settingsDraft.tts_engine, sayVoices.length]);
 
   useEffect(() => {
@@ -1368,6 +1385,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
         WS_RECONNECT_BASE_MS * Math.pow(2, reconnectAttempt)
       );
       reconnectAttempt += 1;
+      setConnection({ phase: "retry_wait", seconds: Math.max(1, Math.round(delay / 1000)) });
       setStatus(`WebSocket getrennt. Verbinde erneut in ${Math.max(1, Math.round(delay / 1000))}s...`);
 
       reconnectTimer = window.setTimeout(() => {
@@ -1381,10 +1399,12 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       }
 
       clearReconnectTimer();
+      setConnection({ phase: reconnectAttempt > 0 ? "reconnecting" : "connecting" });
       const nextSocket = new WebSocket(wsUrl(sessionId));
       socket = nextSocket;
 
       nextSocket.onopen = () => {
+        if (!cancelled && socket === nextSocket) setConnection({ phase: "connected" });
         reconnectAttempt = 0;
         setStatus(`Verbunden mit Agent (${sessionId})`);
       };
@@ -1440,18 +1460,19 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
           ].slice(0, 120));
 
           if (payload.state === "approval_required") {
-            refreshApprovals().catch((error) => setStatus((error as Error).message));
+            refreshApprovals().catch((error) => reportFailure("action", "Freigaben konnten nicht geladen werden", error));
           }
 
           if (payload.state === "done" || payload.state === "error") {
             releaseBusyLock();
             clearStreamingSpeechForRun(payload.run_id);
-            refreshApprovals().catch((error) => setStatus((error as Error).message));
+            refreshApprovals().catch((error) => reportFailure("action", "Freigaben konnten nicht geladen werden", error));
           }
         }
       };
 
       nextSocket.onerror = () => {
+        if (!cancelled && socket === nextSocket) setConnection({ phase: "reconnecting" });
         try {
           nextSocket.close();
         } catch {
@@ -1502,7 +1523,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       await decideApproval(id, decision);
       await refreshApprovals();
     } catch (error) {
-      setStatus((error as Error).message);
+      reportFailure("action", "Freigabeentscheidung fehlgeschlagen", error);
     }
   }
 
@@ -1523,7 +1544,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       setStatus("Settings gespeichert.");
       void onRecheckSetup();
     } catch (error) {
-      setStatus((error as Error).message);
+      reportFailure("action", "Einstellungen konnten nicht gespeichert werden", error);
     }
   }
 
@@ -1551,7 +1572,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       await callSmartHomeService(entityId, service);
       await refreshSmartHome();
     } catch (error) {
-      setStatus((error as Error).message);
+      reportFailure("action", "Smart-Home-Aktion fehlgeschlagen", error);
     }
   }
 
@@ -1772,7 +1793,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
                         type="button"
                         className="secondary"
                         onClick={() => {
-                          refreshAudioVoices().catch((error) => setStatus((error as Error).message));
+                          refreshAudioVoices().catch((error) => reportFailure("voice", "Stimmen konnten nicht geladen werden", error));
                         }}
                       >
                         Neu laden
@@ -1922,10 +1943,15 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
           client: `${window.jarvisDesktop?.platform || "web"} · Electron ${window.jarvisDesktop?.versions.electron || "-"}`
         }}
       >
-        {activeTab === "chat" ? renderChatTab() : null}
-        {activeTab === "approvals" ? renderApprovalsTab() : null}
-        {activeTab === "settings" ? renderSettingsTab() : null}
-        {activeTab === "smarthome" ? renderSmartHomeTab() : null}
+        <div className="app-workspace">
+          <AppFeedback connection={connection} failures={failures} onDismiss={dismissFailure} />
+          <div className="active-view">
+            {activeTab === "chat" ? renderChatTab() : null}
+            {activeTab === "approvals" ? renderApprovalsTab() : null}
+            {activeTab === "settings" ? renderSettingsTab() : null}
+            {activeTab === "smarthome" ? renderSmartHomeTab() : null}
+          </div>
+        </div>
       </AppShell>
 
       <CommandPalette

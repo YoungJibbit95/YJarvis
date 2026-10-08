@@ -5,7 +5,7 @@ const PARTICLES = Array.from({ length: 14 }, (_, index) => index);
 const RUN_LABELS: Record<string, string> = {
   received: "Anfrage empfangen", thinking: "Anfrage wird verarbeitet",
   approval_required: "Freigabe benötigt", executing: "Aktion wird ausgeführt",
-  done: "Vorgang abgeschlossen", error: "Aktion fehlgeschlagen"
+  done: "Vorgang abgeschlossen", error: "Vorgang fehlgeschlagen"
 };
 export function runStateLabel(state: string): string { return Object.prototype.hasOwnProperty.call(RUN_LABELS, state) ? RUN_LABELS[state] : "Statusmeldung"; }
 

@@ -47,6 +47,7 @@ The small header core identifies the product; it is not a second status meter.
 | `app/PresenceStage.tsx`, `app/presence.css` | Pure presentation of assistant mode, microphone flag and latest dated agent event |
 | `PresenceCore` | Decorative core, rings, aurora, grid, particles and symbolic speaking bars; reused in setup |
 | `app/ActionReview.tsx` | Human action label, every supplied input, complete raw input and original decision callbacks |
+| `app/AppFeedback.tsx` | Visible transport status and dismissible failure alerts, independent of diagnostics and assistant mode |
 | `App.tsx`, `styles.css` | Existing state/handlers, conversation, composer, disclosures, settings groups and command dialog |
 | `setup/SetupGate.tsx`, `setup/setup.css` | Activation composition using the existing setup gate |
 | Existing model/hardware presenters | Role-first catalog and readable facts over unchanged validated DTOs |
@@ -71,14 +72,21 @@ infers hardware suitability. Existing App state remains the source of truth.
 | Existing microphone flag | Separate “Mikrofon aktiv/aus” text | Not inferred from Orb mode |
 | `received` / `thinking` | “Anfrage empfangen” / “Anfrage wird verarbeitet” | Actual event, not a fabricated progress stage |
 | `approval_required` / `executing` | “Freigabe benötigt” / “Aktion wird ausgeführt” | Text distinguishes both even when Orb mode remains thinking |
-| `done` / `error` | “Vorgang abgeschlossen” / “Aktion fehlgeschlagen” | Last event stays dated; completion is not persistent system readiness |
+| `done` / `error` | “Vorgang abgeschlossen” / “Vorgang fehlgeschlagen” | Last event stays dated; completion is not persistent system readiness |
 | Unknown event name | Neutral “Statusmeldung” | Exact value remains in event details |
-| Existing connection/status string | “Verbindung & Hinweise” disclosure | Kept separate from assistant, microphone and setup state |
+| WebSocket connect/error/close/retry/open callbacks | Always visible connection line; interruption/retry in amber, cleared only by actual `onopen` | Transport connection is not backend health or model readiness |
+| Chat, Voice, session and action failure callbacks | Visible, dismissible text alerts across all App tabs | Latest failure per category stays until dismissed/replaced; reconnect does not erase failures |
+| Ordinary diagnostic/status string | “Verbindung & Hinweise” disclosure | Never parsed to derive severity or connection state |
 
 The latest event is labelled **Letztes Agent-Ereignis**, with its timestamp. This
 avoids representing a completed or failed historical event as the current state
 of every run. The full bounded event list retains details, original state and
 run ID. The mapping is display-only; no new backend state or transition exists.
+
+Connection status uses a polite, atomic live region; failures use alerts. The
+bounded failure list is keyboard-scrollable, long messages wrap, and closing a
+failure returns focus to the stable feedback region. Diagnostics stay collapsed
+by default without concealing interruptions, failed submissions or Voice errors.
 
 ## Existing product surfaces
 
