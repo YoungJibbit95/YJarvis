@@ -88,7 +88,7 @@ function nodes(node) {
 
 // Execute the real App callbacks with controlled API/transport/timers. This small
 // hook driver renders only App; DOM/focus/layout are checked separately in Chromium.
-async function appHarness(apiOverrides = {}) {
+async function appHarness(apiOverrides = {}, settingsOverrides = {}) {
   const slots = [], effects = [], sockets = [], timers = new Map();
   let cursor = 0, dirty = true, tree, timerId = 0;
   const hooks = {
@@ -123,7 +123,7 @@ async function appHarness(apiOverrides = {}) {
   const api = {
     createSession: async () => ({ session_id: "session-test" }),
     fetchMessages: async () => [], fetchApprovals: async () => [],
-    fetchSettings: async () => ({ model_name: "model", language: "de", ollama_base_url: "http://fixture", tts_engine: "piper", tts_voice: "", say_rate_wpm: 235, tts_sir_pronunciation: "Sör", allowed_paths: [], whisper_binary: "auto", whisper_model_path: "", tts_model_path: "" }),
+    fetchSettings: async () => ({ model_name: "model", language: "de", ollama_base_url: "http://fixture", tts_engine: "piper", tts_voice: "", say_rate_wpm: 235, tts_sir_pronunciation: "Sör", allowed_paths: [], whisper_binary: "auto", whisper_model_path: "", tts_model_path: "", ...settingsOverrides }),
     fetchSmartHomeEntities: async () => [], fetchAudioVoices: async () => [],
     sendChat: async () => ({ run_id: "run-test" }), speak: async () => ({}),
     wsUrl: (id) => `ws://fixture/${id}`, ...apiOverrides
@@ -222,4 +222,47 @@ test("microphone startup rejection is visible and does not imply lost connection
   assert.equal(app.feedback().failures.voice.message, "Microphone denied");
   assert.equal(app.feedback().connection.phase, "connected");
   assert.equal(app.presence().microphoneActive, false);
+});
+
+test("Piper startup never requests the say voice catalog, even if that endpoint would fail", async () => {
+  let requests = 0;
+  const app = await appHarness({ fetchAudioVoices: async () => {
+    requests += 1;
+    throw new Error("Voice catalog unavailable");
+  } });
+  await app.settle();
+  assert.equal(app.find((node) => node.props?.runtime).props.runtime.model, "model"); // Bootstrap settled.
+  assert.equal(requests, 0);
+  assert.equal(app.feedback().failures.voice, undefined);
+  assert.ok(!render(AppFeedback, app.feedback()).includes('role="alert"'));
+});
+
+test("say startup requests its voice catalog and exposes failures through AppFeedback", async () => {
+  let requests = 0;
+  const app = await appHarness({ fetchAudioVoices: async () => {
+    requests += 1;
+    throw new Error("Voice catalog unavailable");
+  } }, { tts_engine: "say" });
+  await app.settle();
+  assert.equal(requests, 1);
+  assert.equal(app.feedback().failures.voice.title, "Stimmen konnten nicht geladen werden");
+  const html = render(AppFeedback, app.feedback());
+  assert.ok(html.includes('role="alert"') && html.includes("Voice catalog unavailable"));
+  assert.equal(app.diagnostic().props.open, undefined);
+});
+
+test("say startup populates voice choices and retains explicit reload", async () => {
+  let requests = 0;
+  const app = await appHarness({ fetchAudioVoices: async () => {
+    requests += 1;
+    return ["Anna", "Markus"];
+  } }, { tts_engine: "say", tts_voice: "Anna" });
+  assert.equal(requests, 1);
+  app.find((node) => node.props?.onNavigate).props.onNavigate("settings"); await app.settle();
+  const select = app.find((node) => node.type === "select" && node.props.value === "Anna");
+  assert.deepEqual(nodes(select).filter((node) => node.type === "option").map((node) => node.props.value), ["Anna", "Markus"]);
+  app.find((node) => node.type === "button" && node.props.children === "Neu laden").props.onClick();
+  await app.settle();
+  assert.equal(requests, 2);
+  assert.equal(app.feedback().failures.voice, undefined);
 });

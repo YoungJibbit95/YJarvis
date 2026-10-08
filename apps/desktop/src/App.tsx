@@ -1324,7 +1324,6 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
         setSettings(initialSettings);
         setSettingsDraft(initialSettings);
         setEntities(initialEntities);
-        refreshAudioVoices().catch((error) => reportFailure("voice", "Stimmen konnten nicht geladen werden", error));
       } catch (error) {
         if (!cancelled) {
           reportFailure("session", "Session konnte nicht vollständig geladen werden", error);
