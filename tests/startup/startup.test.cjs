@@ -269,8 +269,10 @@ test("Electron retains macOS activation and waits through repeated quit events",
   vm.runInNewContext(readFileSync(path.join(root, "apps/desktop/electron/main.cjs"), "utf8"), {
     __dirname: path.join(root, "apps/desktop/electron"), process: processStub, console,
     require: (name) => {
-      if (name === "electron") return { app, BrowserWindow };
+      if (name === "electron") return { app, BrowserWindow, protocol: { registerSchemesAsPrivileged() {} }, Menu: { setApplicationMenu() {} }, ipcMain: { on() {} } };
       if (name === "path") return path;
+      if (name === "node:url") return require(name);
+      if (name === "./packaged.cjs") return require("../../apps/desktop/electron/packaged.cjs");
       assert.equal(name, "../../../scripts/startup.cjs");
       return { OwnedProcesses: function () { return owner; }, startBackend: async (actualOwner, actualRoot, options) => {
         assert.equal(actualOwner, owner);

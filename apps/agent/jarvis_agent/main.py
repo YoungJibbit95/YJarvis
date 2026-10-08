@@ -56,6 +56,7 @@ app.include_router(create_setup_router(database.get_settings, config.default_whi
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "app://yjarvis",
         "http://127.0.0.1:5173",
         "http://localhost:5173",
     ],

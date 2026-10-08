@@ -135,7 +135,17 @@ async function ensureOllama(owner, env = process.env, probe = healthy) {
   if (!["127.0.0.1", "localhost", "[::1]", "0.0.0.0"].includes(url.hostname)) {
     throw new Error(`External Ollama endpoint is unavailable: ${url.origin}`);
   }
-  return owner.start("ollama", ["serve"], { env: { ...env, OLLAMA_HOST: url.origin } });
+  const candidates = [...new Set([
+    env.JARVIS_OLLAMA_BIN,
+    "ollama",
+    ...(owner.platform === "win32" && env.LOCALAPPDATA
+      ? [path.win32.join(env.LOCALAPPDATA, "Programs", "Ollama", "ollama.exe")] : [])
+  ].filter(Boolean))];
+  for (const command of candidates) {
+    try { return await owner.start(command, ["serve"], { env: { ...env, OLLAMA_HOST: url.origin } }); }
+    catch (error) { if (!["ENOENT", "EACCES"].includes(error.code)) throw error; }
+  }
+  throw new Error("Ollama executable not found. Install Ollama or set JARVIS_OLLAMA_BIN.");
 }
 
 async function waitForHealth(url, owner, child, timeoutMs = 30000) {

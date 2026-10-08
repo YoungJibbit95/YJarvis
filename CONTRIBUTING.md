@@ -2,6 +2,15 @@
 
 ## Sources and scope
 
+On 2026-10-08 the user explicitly authorized a separate **Windows installer
+support** step: Windows x64 NSIS packaging, a bundled backend, installed process
+startup/data placement and packaging checks. The user also explicitly requested
+Ollama startup/reachability fixes, checking download endpoints, and replacing
+the Electron menu/native frame with a custom macOS-style titlebar in this cycle. See
+[Windows installer support](docs/architecture/windows-installer.md).
+This overrides the packaging exclusion below only for that step; all other
+roadmap and external-review gates remain in force.
+
 User instructions take precedence, followed by the supplied
 [V2 architecture](docs/architecture/YJarvis_V2_Architecture_and_Browser_Agent_Master_Prompt.md),
 the explicitly approved roadmap step, and existing repository conventions.

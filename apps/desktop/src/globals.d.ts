@@ -2,6 +2,11 @@ declare global {
   interface Window {
     jarvisDesktop?: {
       platform: string;
+      windowControls: {
+        close: () => void;
+        minimize: () => void;
+        toggleMaximize: () => void;
+      };
       versions: {
         electron: string;
         chrome: string;

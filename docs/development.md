@@ -2,6 +2,10 @@
 
 ## What this baseline covers
 
+For the explicitly authorized Windows x64 installer build, prerequisites,
+installed data paths and verification limits, see
+[Windows installer support](architecture/windows-installer.md).
+
 YJ2-00 added CI and review guardrails; YJ2-01 through YJ2-03 added inert domain
 contracts, migration infrastructure and an orchestration extraction. YJW-00A
 adds a native Windows automated baseline. Windows 11 x64 is the primary current
