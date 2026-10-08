@@ -13,7 +13,8 @@ Integrationstestbescheinigung.
 | Setup/Katalog/Hardwarebasis | integriert, lesend | integriert, plattformbedingte Werte | integriert, Headless-Tests |
 | Grafikadapter-Abfrage | integrierte DXGI-Beschreibungen, keine Beschleunigungszusage | ausdrücklich unsupported | ausdrücklich unsupported |
 | URL öffnen | isolierter Provider gemergt, nicht im Chat verdrahtet | aktiver Legacy-`open`-Pfad | kein veröffentlichter nativer Provider |
-| Apps/Clipboard/Raycast | keine produktive Provider-Parität | Legacy; Raycast optional | keine Paritätszusage |
+| Clipboard lesen | isolierter Win32-Provider gemergt, nicht im Chat verdrahtet | Legacy `pbpaste` | kein veröffentlichter nativer Provider |
+| Apps/Clipboard schreiben/Raycast | keine produktive Provider-Parität | Legacy; Raycast optional | keine Paritätszusage |
 | Kalender/Notizen/Mail etc. | keine native Implementierungszusage | Legacy-AppleScript | keine native Implementierung |
 | Dateimutationen | keine Freigabe breiter Windows-Mutation | Legacy-Pfadregeln | bestehender Python-Code, keine Desktop-Zusage |
 | STT/TTS/Playback | native Audioparität unbestätigt | Legacy vorhanden; manuell zu testen | Importtests benötigen Bibliotheken; keine Audio-Zusage |

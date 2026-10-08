@@ -20,6 +20,8 @@ Commitbeschreibungen und Dateiänderungen: [Changelog]({{WIKI}}/Changelog).
 | YJUX-02C1 · #22 | Basis-Hardwareprofil | OS/Architektur/CPU/RAM/Storage, keine GPU/Benchmarks |
 | YJW-01A · #23 | Windows HTTP(S)-URL-Provider | `os.startfile` ohne Shell; nicht im Chat aktiviert |
 | YJUX-02C2A · #24 | native Windows-DXGI-Adapter im Setup | dedizierte Speicherwerte/Shared-Memory-Obergrenze, keine Benchmarks oder Modelltauglichkeit |
+| YJW-01B · #25 | lesender Windows-Unicode-Clipboard-Provider | isolierte Win32-Grenze mit begrenzter Allocation-Kopie und Cleanup; keine Produktionsverdrahtung |
+| Dokumentation · #26 | kategorisiertes technisches Wiki und vollständiger Commit-Changelog | erste Veröffentlichung auf main erfolgreich; Git-Nachweise automatisch, fachliche Texte reviewbar gepflegt |
 
 ## 2026-10-07
 
@@ -53,7 +55,8 @@ Architekturbaseline: `dea0e9e6a266584e9c8efaf53dd82138aecbd662`.
 
 ## Noch nicht veröffentlicht
 
-Lokale Clipboard-Arbeit ist nicht Teil des geprüften Stands.
+Clipboard-Schreiben, Apps-Provider und Produktionsadapter sind nicht Teil des
+geprüften Stands. Clipboard-Lesen aus #25 bleibt ein isolierter Baustein.
 Neue Freigaben nur vom Nutzer; siehe [Roadmap]({{WIKI}}/Roadmap).
 Prüfungen und Integrationsbelege müssen pro PR gelesen werden; diese Seite
 behauptet keine pauschalen manuellen Audio-/macOS-Testergebnisse.

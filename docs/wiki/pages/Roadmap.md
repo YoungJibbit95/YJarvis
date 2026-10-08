@@ -22,10 +22,10 @@ werden; vorhandene Metadaten allein erzwingen sie nicht.
 
 ## Plattformprovider und native Parität
 
-Nach dem isolierten Windows-URL-Fundament sind weitere Provider für Apps,
-Clipboard und später Dateien vorgesehen. YJW-01B/weitere Windows-Teilzyklen
-sind gesonderte Freigaben, keine automatische Fortsetzung. Windows-Dateipolicy
-muss vor Dateimutationen sicher sein. Native Produktivität darf über sichere
+Windows-URL-Öffnen (YJW-01A) und Clipboard-Lesen (YJW-01B) sind isoliert gemergt.
+Weitere Provider für Apps, Clipboard-Schreiben und später Dateien sowie ihre
+Produktionsadapter benötigen gesonderte Freigaben, keine automatische Fortsetzung.
+Windows-Dateipolicy muss vor Dateimutationen sicher sein. Native Produktivität darf über sichere
 lokale/optionale Provider angeboten oder explizit unsupported bleiben;
 Pflicht-Cloudintegration ist kein Paritätsziel. Raycast bleibt optional/macOS.
 
@@ -63,7 +63,7 @@ Nutzerdaten außerhalb des App-Pakets und Upgrade-/Restore-Prüfungen.
 Ein Vite-Build ist noch kein paketiertes Release.
 
 Bereits gemergte Fundamente YJ2-00–04, 05A/B1/B2/B3/C1/C2, YJW-00A/B/B.1,
-YJW-01A und YJUX-00A/B/01A/02A/B/C1/C2A sind in
+YJW-01A/B und YJUX-00A/B/01A/02A/B/C1/C2A sind in
 [Release Notes]({{WIKI}}/Release-Notes) eingeordnet. „Gemergt“ ist ein Git-Fakt,
 keine Aussage über eine hier nicht nachgewiesene externe Abnahme.
 

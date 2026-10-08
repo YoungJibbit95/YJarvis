@@ -21,7 +21,22 @@ Capability `url.open` und validierte HTTP(S)-Eingaben an. Die native Grenze ist
 `os.startfile`, ohne Shell-Interpolation. Die Rückgabe sagt lediglich, dass der
 native Aufruf zurückkehrte; sie prüft weder Browserstart noch geladenen Inhalt.
 Der Provider wird nicht produktiv registriert und nicht an den Planner angehängt.
-Windows Clipboard/App-Provider und deren Adapter sind hier noch geplant.
+
+Der gemergte `WindowsClipboardReadProvider` nimmt nur `clipboard.read` mit dem
+bestehenden leeren Input-Vertrag an. Er liest `CF_UNICODETEXT` über eine lazy
+ctypes/Win32-Grenze; Lesen, Lock und Cleanup laufen auf einem Worker-Thread.
+Die Kopie ist auf die native Allocation begrenzt und wird bis zum ersten
+ausgerichteten UTF-16-NUL strikt decodiert. Kein verfügbares Unicode-Format und
+leerer Text ergeben beide `text=""`; API-/Unicode-/Cleanup-Fehler werden
+nicht als leerer Erfolg ausgegeben. Text wird weder normalisiert noch gekürzt.
+
+Es gibt keine Längenkappe, Retry-/Timeout-Policy oder Abbruchgarantie für einen
+bereits laufenden nativen Read. Clipboard-Inhalte werden nicht gecacht.
+Tests verwenden ausschließlich test-eigene Puffer/Mocks, kein Host-Clipboard.
+
+Explizite Registrierung könnte den Provider im isolierten Runtime-Kernel verfügbar
+machen; Import/Instantiation alleine tun das nicht. Der aktive Chat-/Planner-Pfad
+bleibt unverändert. Clipboard-Schreiben, Apps und Produktionsadapter sind geplant.
 
 ## Produktivität und Kommunikation
 
@@ -64,4 +79,5 @@ Quellen: [System-Tools]({{SOURCE}}/apps/agent/jarvis_agent/tools/system_tools.py
 [AppleScript]({{SOURCE}}/apps/agent/jarvis_agent/tools/applescript_tools.py),
 [Dateien]({{SOURCE}}/apps/agent/jarvis_agent/tools/file_tools.py),
 [Stub]({{SOURCE}}/apps/agent/jarvis_agent/smarthome.py),
-[Windows URL]({{SOURCE}}/docs/architecture/windows-url-provider.md).
+[Windows URL]({{SOURCE}}/docs/architecture/windows-url-provider.md),
+[Windows Clipboard Read]({{SOURCE}}/docs/architecture/windows-clipboard-read-provider.md).

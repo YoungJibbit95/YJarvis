@@ -12,10 +12,22 @@ baseline was `dea0e9e6a266584e9c8efaf53dd82138aecbd662`; the inspected main is
 work through PR #23. During drafting PR #24 merged as
 `da5bd07a9836b53461161bb7747fa26ed83fc32a`; its read-only Windows accelerator
 profile was inspected and incorporated, and the clean documentation branch
-fast-forwarded to that main before its own commit. Dirty local clipboard work is
-not a released capability. Architecture, CONTRIBUTING and AGENTS still contain
+fast-forwarded to that main before its own commit. At that initial source snapshot,
+dirty local clipboard work was not a released capability. Architecture,
+CONTRIBUTING and AGENTS still contain
 older authorization snapshots; this cycle documents that discrepancy without
 changing them or inferring approval from merges.
+
+Documentation maintenance after the user's merge/continuation: PR #25 subsequently
+merged as `9d56454027570d9f338073d349a66a2b0b7a64fe`; PR #26 merged as
+`7419614bfa3ce97e038db9c0bec06f24c5b3acb6`. The first main wiki run
+[37766760867](https://github.com/YoungJibbit95/YJarvis/actions/runs/37766760867)
+validated and published successfully to wiki commit `c041bc7`. Git plus HTTP checks
+confirmed all 25 generated files and the entry-page navigation; the dedicated
+credential's first actual write succeeded. The next small documentation-only
+cycle reviews the merged clipboard provider and advances editorial provenance
+to `7419614`. The native provider remains isolated; no production availability,
+native clipboard smoke, or new runtime authorization is inferred.
 
 Build a disposable preview from the repository root (Python 3.11+, Git only):
 
