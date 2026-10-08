@@ -12,11 +12,11 @@ later subsystems early. Read the accepted
 Windows 11 x64 is the primary current target; macOS Apple Silicon stays first-class
 and Linux remains headless CI. Text/Core startup does not imply native tool/audio parity.
 
-YJ2-00 through YJ2-05A and YJW-00A/B/B.1 are accepted. The current authorization is
-**YJ2-05B1 only**: typed input contracts for all 18 descriptive capability specs,
-with output_model=None and no runtime behavior change.
-See the [typed input note](docs/architecture/typed-tool-inputs.md).
-Output models (05B2), adapters, ToolRuntime (05C), planner/router changes, policy,
+YJ2-00 through YJ2-05B1 and YJW-00A/B/B.1 are accepted. The current authorization is
+**YJ2-05B2 only**: typed successful output contracts for all 18 capability specs,
+with unchanged inputs and no runtime behavior change.
+See the [typed output note](docs/architecture/typed-tool-outputs.md).
+Adapters, ToolRuntime (05C), planner/router changes, policy,
 providers, file safety, audio, UI and packaging remain out of scope.
 Architectural violations require a documented decision and explicit approval,
 not an opportunistic refactor.
@@ -30,8 +30,8 @@ Never work directly on `main` or overwrite another contributor's work.
 For the current step:
 
 ```text
-Branch: yjv2/05b1-typed-tool-inputs
-PR: [YJ2-05B1] Add typed capability input contracts
+Branch: yjv2/05b2-typed-tool-outputs
+PR: [YJ2-05B2] Add typed capability output contracts
 ```
 
 Use the PR template in full. Keep changes narrowly reviewable and reversible.
@@ -94,5 +94,5 @@ available checks are green, hand it to the user for external ChatGPT review
 against the actual diff and the architecture, then stop completely. No next
 branch, next PR, scaffold, or preparatory commit is allowed. CI success is not
 user approval. Only explicit user authorization after external review unlocks
-the next step. After YJ2-05B1, output models (05B2), adapters, ToolRuntime (05C),
+the next step. After YJ2-05B2, adapters, ToolRuntime (05C),
 YJW-01 and audio work remain blocked until explicit next-step approval after review.

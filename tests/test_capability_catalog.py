@@ -1,6 +1,9 @@
 """The new descriptive inventory must not alter legacy identity or authority."""
 
 import asyncio
+import json
+from dataclasses import asdict
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -51,7 +54,7 @@ def test_catalog_is_immutable_and_unknown_names_are_not_guessed():
 def test_deferred_metadata_does_not_pretend_to_be_an_available_typed_provider():
     for spec in LEGACY_TOOL_CATALOG.values():
         assert isinstance(spec.input_model, type) and issubclass(spec.input_model, BaseModel)
-        assert spec.output_model is None
+        assert isinstance(spec.output_model, type) and issubclass(spec.output_model, BaseModel)
         assert spec.reversible is spec.supports_dry_run is False
         assert spec.timeout_seconds == 30
         assert spec.idempotent == (spec.mode == "read")
@@ -60,6 +63,32 @@ def test_deferred_metadata_does_not_pretend_to_be_an_available_typed_provider():
     assert LEGACY_TOOL_CATALOG["raycast_run_command"].mode == "external_side_effect"
     assert LEGACY_TOOL_CATALOG["file_write"].idempotent is False  # Includes append.
     assert LEGACY_TOOL_CATALOG["music_control"].idempotent is False  # Includes next/previous.
+
+
+def test_05b1_inputs_all_other_metadata_and_legacy_planner_specs_remain_unchanged():
+    baseline = json.loads((Path(__file__).parent / "fixtures" / "tool_contract_baseline_05b1.json").read_text(encoding="utf-8"))
+    actual = {}
+    for name, spec in LEGACY_TOOL_CATALOG.items():
+        data = spec.model_dump(exclude={"input_model", "output_model"})
+        data["input_model"] = spec.input_model.__module__ + "." + spec.input_model.__qualname__
+        actual[name] = data
+    assert actual == baseline["catalog"]
+    assert ToolRegistry().list_specs() == baseline["legacy_specs"]
+
+
+@pytest.mark.parametrize("success, output, error", [(True, "App geoeffnet: Safari", None),
+                                                 (False, "", "legacy error")])
+def test_registry_returns_the_original_legacy_tool_result_without_output_conversion(monkeypatch, success, output, error):
+    result = ToolResult(success=success, output=output, error=error)
+    registry = ToolRegistry()
+    execute = AsyncMock(return_value=result)
+    monkeypatch.setattr(registry._tools["open_app"], "execute", execute)
+    actual = asyncio.run(registry.execute("open_app", {"app_name": "Safari"}, {}, {}))
+    assert actual is result
+    assert asdict(actual) == {"success": success, "output": output, "error": error}
+    # The legacy outcome and prose cannot masquerade as successful semantic data.
+    with pytest.raises(ValidationError):
+        LEGACY_TOOL_CATALOG["open_app"].output_model.model_validate(asdict(actual))
 
 
 def test_registry_execution_and_planner_specs_remain_legacy(monkeypatch):

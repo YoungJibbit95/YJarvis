@@ -1,7 +1,8 @@
 # YJ2-05A: descriptive ToolSpec V2 and capability catalog
 
-Historical 05A note: [YJ2-05B1](typed-tool-inputs.md) now populates the 18 input
-references. Outputs remain unmodeled; none of these contracts is wired to runtime.
+Historical 05A note: [YJ2-05B1](typed-tool-inputs.md) populated the 18 input
+references; [YJ2-05B2](typed-tool-outputs.md) populates outputs. These contracts
+remain entirely disconnected from runtime execution.
 
 Base main: `bc18eb2fd11cc753e110acdf3d9a4472edf3950c`, after the externally
 accepted YJW-00B.1 squash merge. Post-merge run `37685689305` passed all six checks,

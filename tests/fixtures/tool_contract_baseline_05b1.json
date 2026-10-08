@@ -1,0 +1,43 @@
+{
+  "source_main": "a79cc256ae0d4bc2df4f0a631812f5a1f7d83b97",
+  "catalog": {
+    "open_url": {"capability": "url.open", "description": "Open an HTTP(S) URL in the user's browser.", "mode": "external_side_effect", "default_risk": "medium", "reversible": false, "idempotent": false, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.UrlOpenInput"},
+    "open_app": {"capability": "apps.open", "description": "Open an application by name.", "mode": "system", "default_risk": "medium", "reversible": false, "idempotent": false, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.AppOpenInput"},
+    "raycast_open": {"capability": "raycast.open", "description": "Open optional Raycast integration, optionally with search text.", "mode": "system", "default_risk": "low", "reversible": false, "idempotent": false, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.RaycastOpenInput"},
+    "raycast_run_command": {"capability": "raycast.command.run", "description": "Invoke an optional Raycast extension command with potentially external effects.", "mode": "external_side_effect", "default_risk": "high", "reversible": false, "idempotent": false, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.RaycastCommandRunInput"},
+    "clipboard_read": {"capability": "clipboard.read", "description": "Read clipboard text.", "mode": "read", "default_risk": "low", "reversible": false, "idempotent": true, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.ClipboardReadInput"},
+    "clipboard_write": {"capability": "clipboard.write", "description": "Replace clipboard text.", "mode": "write", "default_risk": "medium", "reversible": false, "idempotent": false, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.ClipboardWriteInput"},
+    "reminder_create": {"capability": "reminders.create", "description": "Create a reminder, optionally with notes and a due date.", "mode": "write", "default_risk": "medium", "reversible": false, "idempotent": false, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.ReminderCreateInput"},
+    "reminder_list": {"capability": "reminders.list", "description": "List incomplete reminders from a selected list.", "mode": "read", "default_risk": "low", "reversible": false, "idempotent": true, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.ReminderListInput"},
+    "calendar_create_event": {"capability": "calendar.events.create", "description": "Create a calendar event.", "mode": "write", "default_risk": "medium", "reversible": false, "idempotent": false, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.CalendarCreateEventInput"},
+    "calendar_list_events": {"capability": "calendar.events.list", "description": "List upcoming calendar events.", "mode": "read", "default_risk": "low", "reversible": false, "idempotent": true, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.CalendarListEventsInput"},
+    "notes_create": {"capability": "notes.create", "description": "Create a note and, if needed, its destination folder.", "mode": "write", "default_risk": "medium", "reversible": false, "idempotent": false, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.NotesCreateInput"},
+    "notes_search": {"capability": "notes.search", "description": "Find notes by text, optionally within a folder.", "mode": "read", "default_risk": "low", "reversible": false, "idempotent": true, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.NotesSearchInput"},
+    "mail_create_draft": {"capability": "mail.drafts.create", "description": "Create an email draft without sending it.", "mode": "write", "default_risk": "medium", "reversible": false, "idempotent": false, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.MailCreateDraftInput"},
+    "messages_send": {"capability": "messages.send", "description": "Send a message to a recipient.", "mode": "external_side_effect", "default_risk": "high", "reversible": false, "idempotent": false, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.MessagesSendInput"},
+    "contacts_search": {"capability": "contacts.search", "description": "Find contacts by name.", "mode": "read", "default_risk": "low", "reversible": false, "idempotent": true, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.ContactsSearchInput"},
+    "music_control": {"capability": "music.control", "description": "Control playback, including next and previous track.", "mode": "system", "default_risk": "low", "reversible": false, "idempotent": false, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.MusicControlInput"},
+    "file_read": {"capability": "files.read", "description": "Read text from a permitted file.", "mode": "read", "default_risk": "medium", "reversible": false, "idempotent": true, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.FileReadInput"},
+    "file_write": {"capability": "files.write", "description": "Overwrite or append text to a permitted file.", "mode": "write", "default_risk": "high", "reversible": false, "idempotent": false, "supports_dry_run": false, "timeout_seconds": 30.0, "input_model": "jarvis_agent.domain.tool_inputs.FileWriteInput"}
+  },
+  "legacy_specs": [
+    {"tool_name": "open_url", "risk_level": "medium", "requires_approval": true, "input_schema": {"url": "string"}},
+    {"tool_name": "open_app", "risk_level": "medium", "requires_approval": true, "input_schema": {"app_name": "string"}},
+    {"tool_name": "raycast_open", "risk_level": "low", "requires_approval": true, "input_schema": {"fallback_text": "string"}},
+    {"tool_name": "raycast_run_command", "risk_level": "medium", "requires_approval": true, "input_schema": {"owner": "string", "extension": "string", "command": "string", "fallback_text": "string", "background": "boolean"}},
+    {"tool_name": "clipboard_read", "risk_level": "low", "requires_approval": true, "input_schema": {}},
+    {"tool_name": "clipboard_write", "risk_level": "medium", "requires_approval": true, "input_schema": {"text": "string"}},
+    {"tool_name": "reminder_create", "risk_level": "medium", "requires_approval": true, "input_schema": {"title": "string", "notes": "string", "due_at": "string (ISO datetime)"}},
+    {"tool_name": "reminder_list", "risk_level": "low", "requires_approval": true, "input_schema": {"limit": "number", "list_name": "string"}},
+    {"tool_name": "calendar_create_event", "risk_level": "medium", "requires_approval": true, "input_schema": {"title": "string", "start_at": "string (ISO datetime)", "start_offset_minutes": "number", "duration_minutes": "number"}},
+    {"tool_name": "calendar_list_events", "risk_level": "low", "requires_approval": true, "input_schema": {"days_ahead": "number", "limit": "number"}},
+    {"tool_name": "notes_create", "risk_level": "medium", "requires_approval": true, "input_schema": {"title": "string", "content": "string", "folder": "string"}},
+    {"tool_name": "notes_search", "risk_level": "low", "requires_approval": true, "input_schema": {"query": "string", "limit": "number", "folder": "string"}},
+    {"tool_name": "mail_create_draft", "risk_level": "medium", "requires_approval": true, "input_schema": {"subject": "string", "content": "string", "to": "string"}},
+    {"tool_name": "messages_send", "risk_level": "high", "requires_approval": true, "input_schema": {"to": "string", "text": "string"}},
+    {"tool_name": "contacts_search", "risk_level": "low", "requires_approval": true, "input_schema": {"query": "string", "limit": "number"}},
+    {"tool_name": "music_control", "risk_level": "low", "requires_approval": true, "input_schema": {"action": "play|pause|next|previous"}},
+    {"tool_name": "file_read", "risk_level": "medium", "requires_approval": true, "input_schema": {"path": "string"}},
+    {"tool_name": "file_write", "risk_level": "high", "requires_approval": true, "input_schema": {"path": "string", "content": "string", "mode": "string"}}
+  ]
+}
