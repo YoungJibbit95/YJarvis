@@ -12,13 +12,13 @@ later subsystems early. Read the accepted
 Windows 11 x64 is the primary current target; macOS Apple Silicon stays first-class
 and Linux remains headless CI. Text/Core startup does not imply native tool/audio parity.
 
-YJ2-00 through YJ2-05C2 and YJW-00A/B/B.1/01A are accepted. The current authorization is
-**YJW-01B only**: one isolated Windows semantic `clipboard.read` provider, composed only
+YJ2-00 through YJ2-05C2 and YJW-00A/B/B.1/01A/01B are accepted. The current authorization is
+**YJW-01C only**: one isolated Windows semantic `clipboard.write` provider, composed only
 explicitly through the unchanged C1 kernel and C2 registry.
 Spec metadata/input/output contracts remain unchanged; application execution stays legacy.
-See the [Windows clipboard-read provider note](docs/architecture/windows-clipboard-read-provider.md).
+See the [Windows clipboard-write provider note](docs/architecture/windows-clipboard-write-provider.md).
 Adapters, production wiring, timeout enforcement, Observations, persistence/events,
-planner/router changes, policy, apps/clipboard.write/files providers, auto-discovery,
+planner/router changes, policy, apps/files providers, auto-discovery,
 planner availability, macOS provider migration, audio, UI and packaging remain out of scope.
 Architectural violations require a documented decision and explicit approval,
 not an opportunistic refactor.
@@ -32,8 +32,8 @@ Never work directly on `main` or overwrite another contributor's work.
 For the current step:
 
 ```text
-Branch: yjv2/w01b-windows-clipboard-read-provider
-PR: [YJW-01B] Add Windows semantic clipboard-read provider
+Branch: yjv2/w01c-windows-clipboard-write-provider
+PR: [YJW-01C] Add Windows semantic clipboard-write provider
 ```
 
 Use the PR template in full. Keep changes narrowly reviewable and reversible.
@@ -96,5 +96,5 @@ available checks are green, hand it to the user for external ChatGPT review
 against the actual diff and the architecture, then stop completely. No next
 branch, next PR, scaffold, or preparatory commit is allowed. CI success is not
 user approval. Only explicit user authorization after external review unlocks
-the next step. After YJW-01B, YJW-01C, apps.open, adapters, YJ2-05C3
+the next step. After YJW-01C, YJW-01D, apps.open, adapters, YJ2-05C3
 and audio work remain blocked until explicit next-step approval after review.
