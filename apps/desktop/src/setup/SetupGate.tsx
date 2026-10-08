@@ -4,6 +4,7 @@ import { fetchSetupStatus, waitForBackend } from "../api";
 import { AppHeader } from "../app/AppShell";
 import { SETUP_LABELS, SetupStatusView } from "./SetupStatusView";
 import type { SetupCheck } from "./types";
+import { ModelCatalogBrowser } from "./ModelCatalogBrowser";
 
 export function SetupGate() {
   const [check, setCheck] = useState<SetupCheck>({ state: "checking", backendReachable: false });
@@ -65,6 +66,7 @@ export function SetupGate() {
           {check.backendReachable ? <button type="button" className="secondary" onClick={() => setEnteredApp(true)}>Später · App ansehen</button> : null}
         </div>
         <p className="setup-footnote">Ohne bestätigtes Chat-Modell bleibt der Chat gesperrt. Settings und Approvals bleiben in der App erreichbar.</p>
+        <ModelCatalogBrowser />
       </main>
     </div>
   );

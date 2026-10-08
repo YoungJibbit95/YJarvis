@@ -1,5 +1,6 @@
 import type { Approval, JarvisSettings, SmartHomeEntity } from "@jarvis/shared-types";
 import { parseSetupStatus, type SetupStatus } from "./setup/types";
+import { parseModelCatalog, type ModelCatalogEntry } from "./setup/modelCatalog";
 
 const AGENT_HOST = import.meta.env.VITE_JARVIS_AGENT_HOST || "127.0.0.1";
 const AGENT_PORT = import.meta.env.VITE_JARVIS_AGENT_PORT || "8787";
@@ -87,6 +88,12 @@ export async function fetchSetupStatus(signal: AbortSignal): Promise<SetupStatus
   const response = await fetch(`${API_BASE}/v1/setup/status`, { cache: "no-store", signal });
   if (!response.ok) throw new Error("Setup inspection failed");
   return parseSetupStatus(await response.json());
+}
+
+export async function fetchModelCatalog(signal: AbortSignal): Promise<ModelCatalogEntry[]> {
+  const response = await fetch(`${API_BASE}/v1/setup/models`, { cache: "no-store", signal });
+  if (!response.ok) throw new Error("Model catalog unavailable");
+  return parseModelCatalog(await response.json());
 }
 
 export async function createSession(): Promise<{ session_id: string }> {
