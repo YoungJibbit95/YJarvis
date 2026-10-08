@@ -85,6 +85,14 @@
 .catalog-details summary { font-size: var(--yj-font-size-small); }
 .catalog-source code { display: block; margin-top: var(--yj-space-1); user-select: text; }
 .catalog-error button { margin-top: var(--yj-space-2); }
+.setup-hardware { margin-top: var(--yj-space-4); padding-top: var(--yj-space-3); border-top: 1px solid var(--yj-border); min-width: 0; }
+.setup-hardware > summary { padding: var(--yj-space-3) 0; cursor: pointer; font-weight: 600; }
+.setup-hardware > summary:focus-visible { outline: var(--yj-focus-width) solid var(--yj-accent); outline-offset: var(--yj-focus-offset); }
+.setup-hardware p { color: var(--yj-text-muted); font-size: var(--yj-font-size-small); line-height: 1.6; }
+.hardware-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); gap: var(--yj-space-4); }
+.hardware-facts > div { min-width: 0; overflow-wrap: anywhere; }
+.hardware-facts dt { color: var(--yj-text-muted); font-size: var(--yj-font-size-small); }
+.hardware-facts dd { margin: var(--yj-space-2) 0 0; }
 @media (max-width: 760px) {
   .setup-first-run { margin-top: 24px; }
   .setup-components { grid-template-columns: minmax(0, 1fr); }

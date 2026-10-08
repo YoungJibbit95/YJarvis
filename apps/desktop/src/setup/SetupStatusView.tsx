@@ -1,5 +1,6 @@
 import type { SetupCheck } from "./types";
 import { ModelCatalogBrowser } from "./ModelCatalogBrowser";
+import { HardwareProfileView } from "./HardwareProfileView";
 
 export const SETUP_LABELS: Record<SetupCheck["state"], string> = {
   checking: "Einrichtung wird geprüft",
@@ -53,6 +54,7 @@ export function SetupNotice({ check, onRetry }: { check: SetupCheck; onRetry: ()
         <SetupStatusView check={check} />
         <p>Die Prüfung verändert keine Settings. Voice ist optional; vorhandene Dateien sind kein Audio-Funktionstest.</p>
         <ModelCatalogBrowser />
+        <HardwareProfileView />
       </details>
       <button type="button" className="secondary" disabled={check.state === "checking"} onClick={onRetry}>Erneut prüfen</button>
     </aside>
