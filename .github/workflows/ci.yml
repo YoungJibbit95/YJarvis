@@ -93,6 +93,8 @@ jobs:
           npm --version
       - name: Typecheck the renderer and its shared types
         run: npm run typecheck
+      - name: Validate catalog DTO and read-only presentation
+        run: node --test tests/desktop/model-catalog.test.cjs
       - name: Syntax-check Electron entry points without launching the app
         run: |
           node --check apps/desktop/electron/main.cjs
@@ -188,6 +190,8 @@ jobs:
       # an earlier nonzero exit code in PowerShell.
       - name: Typecheck the renderer and its shared types
         run: npm run typecheck
+      - name: Validate catalog DTO and read-only presentation
+        run: node --test tests/desktop/model-catalog.test.cjs
       - name: Syntax-check Electron main
         run: node --check apps/desktop/electron/main.cjs
       - name: Syntax-check Electron preload

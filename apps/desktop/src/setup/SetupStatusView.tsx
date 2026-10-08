@@ -1,4 +1,5 @@
 import type { SetupCheck } from "./types";
+import { ModelCatalogBrowser } from "./ModelCatalogBrowser";
 
 export const SETUP_LABELS: Record<SetupCheck["state"], string> = {
   checking: "Einrichtung wird geprüft",
@@ -51,6 +52,7 @@ export function SetupNotice({ check, onRetry }: { check: SetupCheck; onRetry: ()
         <summary aria-label={SETUP_LABELS[check.state]}><span role="status">{SETUP_LABELS[check.state]}</span></summary>
         <SetupStatusView check={check} />
         <p>Die Prüfung verändert keine Settings. Voice ist optional; vorhandene Dateien sind kein Audio-Funktionstest.</p>
+        <ModelCatalogBrowser />
       </details>
       <button type="button" className="secondary" disabled={check.state === "checking"} onClick={onRetry}>Erneut prüfen</button>
     </aside>

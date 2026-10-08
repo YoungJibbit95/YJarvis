@@ -68,9 +68,27 @@
 .setup-notice > button { flex-shrink: 0; }
 .setup-notice p { font-size: var(--yj-font-size-small); line-height: 1.6; }
 .setup-notice .setup-components { margin: var(--yj-space-3) 0; }
+.model-catalog { margin-top: var(--yj-space-4); border-top: 1px solid var(--yj-border); padding-top: var(--yj-space-3); min-width: 0; }
+.model-catalog summary { cursor: pointer; padding: var(--yj-space-3) 0; }
+.model-catalog > summary { color: var(--yj-text); font-weight: 600; }
+.model-catalog summary:focus-visible { outline: var(--yj-focus-width) solid var(--yj-accent); outline-offset: var(--yj-focus-offset); }
+.model-catalog p { color: var(--yj-text-muted); font-size: var(--yj-font-size-small); line-height: 1.6; }
+.catalog-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--yj-space-4); list-style: none; padding: 0; margin: var(--yj-space-4) 0 0; }
+.catalog-card { min-width: 0; padding: var(--yj-space-4); border: 1px solid var(--yj-border); border-radius: var(--yj-radius-control); background: var(--yj-control-bg-field); overflow-wrap: anywhere; }
+.catalog-category { color: var(--yj-accent); font-size: var(--yj-font-size-small); }
+.catalog-card h3 { font-size: 17px; margin: var(--yj-space-2) 0; }
+.catalog-facts { margin: var(--yj-space-4) 0; font-size: var(--yj-font-size-small); line-height: 1.6; }
+.catalog-facts > div + div { margin-top: var(--yj-space-3); }
+.catalog-facts dt { color: var(--yj-text-muted); }
+.catalog-facts dd { margin: 0; }
+.catalog-details { border-top: 1px solid var(--yj-border); }
+.catalog-details summary { font-size: var(--yj-font-size-small); }
+.catalog-source code { display: block; margin-top: var(--yj-space-1); user-select: text; }
+.catalog-error button { margin-top: var(--yj-space-2); }
 @media (max-width: 760px) {
   .setup-first-run { margin-top: 24px; }
   .setup-components { grid-template-columns: minmax(0, 1fr); }
   .setup-notice { flex-wrap: wrap; }
   .setup-notice details { flex-basis: 100%; }
+  .catalog-grid { grid-template-columns: minmax(0, 1fr); }
 }
