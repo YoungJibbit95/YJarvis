@@ -1,0 +1,20 @@
+.desktop-frame { height: 100%; display: flex; flex-direction: column; }
+.desktop-titlebar {
+  height: 38px; flex: 0 0 38px; position: relative; display: flex; align-items: center;
+  padding: 0 16px; background: #0b141d; border-bottom: 1px solid #ffffff09;
+  -webkit-app-region: drag; user-select: none;
+}
+.desktop-window-controls { display: flex; align-items: center; gap: 8px; -webkit-app-region: no-drag; }
+.desktop-window-controls button {
+  width: 13px; height: 13px; min-height: 0; padding: 0; border-radius: 50%;
+  border: 1px solid #00000020; display: grid; place-items: center; color: #352d29;
+  font: 12px/10px system-ui; cursor: default;
+}
+.desktop-window-controls .window-close { background: #ff5f57; }
+.desktop-window-controls .window-minimize { background: #febc2e; }
+.desktop-window-controls .window-maximize { background: #28c840; }
+.desktop-window-controls span { opacity: 0; }
+.desktop-window-controls:hover span, .desktop-window-controls button:focus-visible span { opacity: 1; }
+.desktop-window-controls button:focus-visible { outline: 2px solid #b3f2ff; outline-offset: 3px; }
+.desktop-window-title { position: absolute; left: 50%; transform: translateX(-50%); color: #91a8b6; font-size: 12px; letter-spacing: .03em; }
+.desktop-content { flex: 1; min-height: 0; }

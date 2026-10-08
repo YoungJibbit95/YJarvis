@@ -1,6 +1,32 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, protocol, net, dialog, Menu, ipcMain } = require("electron");
 const path = require("path");
-const { OwnedProcesses, startBackend } = require("../../../scripts/startup.cjs");
+const { pathToFileURL } = require("node:url");
+const { OwnedProcesses, startBackend, waitForHealth, ensureOllama, ollamaUrl } = require(app.isPackaged
+  ? path.join(process.resourcesPath, "startup.cjs")
+  : "../../../scripts/startup.cjs");
+const { startPackagedBackend, rendererFile } = require("./packaged.cjs");
+
+protocol.registerSchemesAsPrivileged([{
+  scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
+}]);
+
+// macOS has a system app menu (including Quit), rather than an in-window menu.
+if (process.platform !== "darwin") Menu.setApplicationMenu(null);
+ipcMain.on("jarvis:window-control", (event, action) => {
+  const frame = event.senderFrame;
+  if (!frame || frame !== event.sender.mainFrame) return;
+  const url = new URL(frame.url);
+  if (app.isPackaged ? url.protocol !== "app:" || url.host !== "yjarvis" || url.username || url.password
+    : url.origin !== "http://127.0.0.1:5173") return;
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window) return;
+  if (action === "close") window.close();
+  else if (action === "minimize") window.minimize();
+  else if (action === "toggle-maximize") {
+    if (window.isMaximized()) window.unmaximize();
+    else window.maximize();
+  }
+});
 
 const OPEN_DEVTOOLS = process.env.JARVIS_OPEN_DEVTOOLS === "1";
 const ENABLE_AGENT_RELOAD = process.env.JARVIS_AGENT_RELOAD === "1";
@@ -12,6 +38,8 @@ function createWindow() {
   const window = new BrowserWindow({
     width: 1320,
     height: 860,
+    frame: false,
+    autoHideMenuBar: true,
     backgroundColor: "#0f1116",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -27,7 +55,7 @@ function createWindow() {
       window.webContents.openDevTools({ mode: "detach" });
     }
   } else {
-    window.loadFile(path.join(__dirname, "../dist/index.html"));
+    window.loadURL("app://yjarvis/index.html");
   }
 }
 
@@ -50,14 +78,39 @@ process.on("SIGTERM", () => app.quit());
 app.whenReady().then(async () => {
   const projectRoot = path.resolve(__dirname, "../../..");
   try {
-    const child = await startBackend(backendOwner, projectRoot, {
-      reload: !app.isPackaged && ENABLE_AGENT_RELOAD
-    });
+    if (app.isPackaged) {
+      protocol.handle("app", (request) => {
+        try {
+          return net.fetch(pathToFileURL(rendererFile(request.url, path.join(__dirname, "../dist"))).href);
+        } catch {
+          return new Response("Not found", { status: 404 });
+        }
+      });
+    }
+    const child = app.isPackaged
+      ? await startPackagedBackend(backendOwner, process.resourcesPath, app.getPath("userData"))
+      : await startBackend(backendOwner, projectRoot, { reload: ENABLE_AGENT_RELOAD });
     child?.on("exit", (code, signal) => {
       if (!app.isQuitting) console.error(`[jarvis] Backend exited (code=${code}, signal=${signal}).`);
     });
+    if (app.isPackaged) {
+      // Ollama is optional during setup. Reuse an existing server, or own only
+      // the server started here. Missing installations leave setup accessible.
+      try {
+        const ollama = await ensureOllama(backendOwner);
+        await waitForHealth(new URL("/api/tags", ollamaUrl()), backendOwner, ollama);
+      } catch (error) {
+        if (!app.isQuitting) console.error("[jarvis] Ollama startup:", error.message);
+      }
+    }
+    if (app.isPackaged) await waitForHealth("http://127.0.0.1:8787/health", backendOwner, child);
   } catch (error) {
     if (!app.isQuitting) console.error("[jarvis] Backend startup:", error.message);
+    if (app.isPackaged && !app.isQuitting) {
+      dialog.showErrorBox("YJarvis konnte nicht starten", error.message);
+      app.quit();
+      return;
+    }
   }
   if (app.isQuitting) return;
   createWindow();

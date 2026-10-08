@@ -1,0 +1,2 @@
+# Build-only dependency; not installed by the application or base setup.
+pyinstaller==6.22.3
