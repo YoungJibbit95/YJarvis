@@ -12,11 +12,13 @@ later subsystems early. Read the accepted
 Windows 11 x64 is the primary current target; macOS Apple Silicon stays first-class
 and Linux remains headless CI. Text/Core startup does not imply native tool/audio parity.
 
-YJ2-00 through YJ2-05B2 and YJW-00A/B/B.1 are accepted. The current authorization is
-**YJ2-05B3 only**: semantic catalog lookup/ownership with a read-only legacy view,
-unchanged spec metadata/input/output contracts and no runtime behavior change.
-See the [semantic catalog note](docs/architecture/semantic-capability-catalog.md).
-Adapters, ToolRuntime (05C1), planner/router changes, policy,
+YJ2-00 through YJ2-05B3 and YJW-00A/B/B.1 are accepted. The current authorization is
+**YJ2-05C1 only**: an unwired semantic ToolRuntime kernel that validates inputs,
+invokes one injected async provider and validates outputs. Spec metadata and
+input/output contracts remain unchanged; existing application execution stays legacy.
+See the [kernel note](docs/architecture/semantic-tool-runtime-kernel.md).
+Adapters, production wiring, timeout enforcement, Observations, persistence/events,
+planner/router changes, policy,
 providers, file safety, audio, UI and packaging remain out of scope.
 Architectural violations require a documented decision and explicit approval,
 not an opportunistic refactor.
@@ -30,8 +32,8 @@ Never work directly on `main` or overwrite another contributor's work.
 For the current step:
 
 ```text
-Branch: yjv2/05b3-semantic-catalog
-PR: [YJ2-05B3] Establish semantic capability catalog lookup
+Branch: yjv2/05c1-tool-runtime-kernel
+PR: [YJ2-05C1] Introduce semantic ToolRuntime execution kernel
 ```
 
 Use the PR template in full. Keep changes narrowly reviewable and reversible.
@@ -94,5 +96,5 @@ available checks are green, hand it to the user for external ChatGPT review
 against the actual diff and the architecture, then stop completely. No next
 branch, next PR, scaffold, or preparatory commit is allowed. CI success is not
 user approval. Only explicit user authorization after external review unlocks
-the next step. After YJ2-05B3, adapters, ToolRuntime (05C1),
+the next step. After YJ2-05C1, adapters, YJ2-05C2,
 YJW-01 and audio work remain blocked until explicit next-step approval after review.
