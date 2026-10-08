@@ -10,7 +10,10 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from jarvis_agent.domain.capability_catalog import LEGACY_TOOL_CATALOG
+from jarvis_agent.domain import tool_inputs, tool_outputs
+from jarvis_agent.domain.capability_catalog import (
+    CAPABILITY_CATALOG, LEGACY_TOOL_CATALOG, LEGACY_TOOL_TO_CAPABILITY,
+)
 from jarvis_agent.tools import ToolRegistry
 from jarvis_agent.tools.base import ToolResult
 from test_turn_lifecycle import rig
@@ -27,6 +30,54 @@ EXPECTED_MAPPING = {
     "contacts_search": "contacts.search", "music_control": "music.control",
     "file_read": "files.read", "file_write": "files.write",
 }
+
+
+def test_semantic_catalog_and_legacy_view_share_exactly_eighteen_specs_bijectively():
+    assert len(CAPABILITY_CATALOG) == len(LEGACY_TOOL_CATALOG) == len(LEGACY_TOOL_TO_CAPABILITY) == 18
+    assert dict(LEGACY_TOOL_TO_CAPABILITY) == EXPECTED_MAPPING
+    assert set(CAPABILITY_CATALOG) == set(EXPECTED_MAPPING.values())
+    assert set(LEGACY_TOOL_CATALOG) == set(EXPECTED_MAPPING)
+    assert len(set(LEGACY_TOOL_TO_CAPABILITY.values())) == 18
+    assert len({id(spec) for spec in CAPABILITY_CATALOG.values()}) == 18
+    assert {id(spec) for spec in CAPABILITY_CATALOG.values()} == {id(spec) for spec in LEGACY_TOOL_CATALOG.values()}
+    for legacy_name, capability in EXPECTED_MAPPING.items():
+        spec = CAPABILITY_CATALOG[capability]
+        assert spec is LEGACY_TOOL_CATALOG[legacy_name]
+        assert spec.capability == capability
+        # Names are exact keys, not interchangeable aliases or inferred spelling.
+        with pytest.raises(KeyError):
+            CAPABILITY_CATALOG[legacy_name]
+        with pytest.raises(KeyError):
+            LEGACY_TOOL_CATALOG[capability]
+
+
+@pytest.mark.parametrize("catalog, key", [
+    (CAPABILITY_CATALOG, "apps.open"),
+    (LEGACY_TOOL_CATALOG, "open_app"),
+    (LEGACY_TOOL_TO_CAPABILITY, "open_app"),
+])
+def test_all_catalog_views_and_mapping_are_read_only(catalog, key):
+    with pytest.raises(TypeError):
+        catalog[key] = catalog[key]
+    with pytest.raises(TypeError):
+        del catalog[key]
+    with pytest.raises(ValidationError, match="frozen"):
+        CAPABILITY_CATALOG["apps.open"].capability = "apps.changed"
+
+
+@pytest.mark.parametrize("key", ["unknown.capability", "open_app", "apps_open", "Apps.Open", " apps.open", "apps.open ", "calendar.create_event", "raycast.run_command"])
+def test_semantic_lookup_has_no_fallback_or_name_conversion(key):
+    with pytest.raises(KeyError) as error:
+        CAPABILITY_CATALOG[key]
+    assert error.value.args == (key,)
+
+
+@pytest.mark.parametrize("key", ["unknown_tool", "apps.open", "Open_App", " open_app", "open_app ", "open.app"])
+def test_legacy_mapping_and_view_do_not_guess_names(key):
+    for mapping in (LEGACY_TOOL_TO_CAPABILITY, LEGACY_TOOL_CATALOG):
+        with pytest.raises(KeyError) as error:
+            mapping[key]
+        assert error.value.args == (key,)
 
 
 def test_catalog_covers_the_actual_registry_exactly_once():
@@ -74,6 +125,19 @@ def test_05b1_inputs_all_other_metadata_and_legacy_planner_specs_remain_unchange
         actual[name] = data
     assert actual == baseline["catalog"]
     assert ToolRegistry().list_specs() == baseline["legacy_specs"]
+
+
+def test_semantic_specs_preserve_accepted_metadata_and_exact_input_output_classes():
+    fixtures = Path(__file__).parent / "fixtures"
+    baseline = json.loads((fixtures / "tool_contract_baseline_05b1.json").read_text(encoding="utf-8"))
+    outputs = json.loads((fixtures / "tool_outputs.json").read_text(encoding="utf-8"))
+    for name, expected in baseline["catalog"].items():
+        spec = CAPABILITY_CATALOG[expected["capability"]]
+        assert spec.input_model is getattr(tool_inputs, expected["input_model"].rsplit(".", 1)[1])
+        assert spec.output_model is getattr(tool_outputs, outputs[name]["model"])
+        assert spec.model_dump(exclude={"input_model", "output_model"}) == {
+            key: value for key, value in expected.items() if key != "input_model"
+        }
 
 
 @pytest.mark.parametrize("success, output, error", [(True, "App geoeffnet: Safari", None),

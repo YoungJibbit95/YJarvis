@@ -5,16 +5,17 @@ and `CONTRIBUTING.md` before editing. The architecture describes a migration tar
 not capabilities already present in the legacy application.
 
 - Work only on the step explicitly authorized by the user. YJ2-00 through
-  YJ2-05B1 and YJW-00A/B/B.1 are accepted; the current authorized step is YJ2-05B2:
-  populate all 18 descriptive capability specs with typed successful output contracts.
+  YJ2-05B2 and YJW-00A/B/B.1 are accepted; the current authorized step is YJ2-05B3:
+  semantic capability catalog ownership with an explicit read-only legacy view.
 - Use one branch and one PR per step. Never work directly on `main`, stack an
   unreviewed step, merge your own migration PR, or enable auto-merge.
 - The user explicitly authorized Codex for implementation on 2026-10-07,
   superseding the historical agent/tooling restriction in the architecture source.
   Use direct GitHub operations and normal tools; no agent delegation is required.
-- For YJ2-05B2, add only output contracts, catalog references, tests and documentation.
+- For YJ2-05B3, change only catalog lookup/ownership, tests and documentation.
   Keep runtime execution, planner specs, approvals, routing and wire/DB names legacy.
-  Keep accepted input models unchanged. Do not begin adapters, ToolRuntime (05C), policy, providers,
+  Keep all accepted spec metadata and input/output models unchanged.
+  Do not begin adapters, ToolRuntime (05C1), policy, providers,
   UI/voice, file safety or packaging. Catalog membership is not platform availability.
 - Read `docs/architecture/02_WINDOWS_CROSS_PLATFORM_ARCHITECTURE_ADDENDUM.md`.
   Core code stays OS-neutral; platform startup code belongs at the process boundary.
