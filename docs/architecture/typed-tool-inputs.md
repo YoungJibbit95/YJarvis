@@ -1,5 +1,8 @@
 # YJ2-05B1: typed capability inputs, still inert
 
+Historical 05B1 note: [YJ2-05B2](typed-tool-outputs.md) populates output references.
+The accepted input contracts and the inert runtime boundary remain unchanged.
+
 Initial main: `35a04e43598611e6cfc5c67ccafa05ae9915ad74`, the accepted PR #11
 squash merge. Post-merge run `37688306762` passed all six checks before this branch.
 Final base main: `1c9a338137c6211f88f88239d82cfb189d47ef7d`, after the concurrent
