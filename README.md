@@ -30,10 +30,23 @@ is the migration source of truth. Follow [CONTRIBUTING.md](CONTRIBUTING.md): one
 approved step, one PR, external review, then explicit user authorization to proceed.
 YJ2-00 adds infrastructure only; the product behavior described below is unchanged.
 
+## Automatic base setup (no models)
+
+The [setup folder](setup/README.md) installs the base tools and project dependencies:
+
+- Windows 11 x64: run `setup\windows.bat`.
+- macOS: run `bash setup/macos.sh`.
+- Linux (Debian/Ubuntu, Fedora, Arch): run `bash setup/linux.sh`.
+
+Ollama, FFmpeg, whisper.cpp and Piper are included; model/voice downloads and
+application startup happen afterward. See the setup guide for permissions,
+the preview mode and activating the installed tools. Installing tools does not
+add native Windows/Linux audio or automation support to the application.
+
 ## Requirements (macOS)
 
 ```bash
-brew install python@3.11 node@22 ollama ffmpeg whisper-cpp portaudio libsndfile
+brew install python@3.11 node@22 ollama ffmpeg whisper.cpp portaudio libsndfile
 export PATH="$(brew --prefix node@22)/bin:$PATH"
 ```
 

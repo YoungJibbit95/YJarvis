@@ -22,6 +22,11 @@ currently does not construct IANA `ZoneInfo` objects. Runtime manifests are unch
 
 ## Native Windows automated checks (YJW-00A)
 
+For a new checkout, the [automatic base setup](../setup/README.md) provides
+Windows, macOS and Linux installers for tools and the existing dependency manifests,
+without models. It is an explicit local command, separate from runtime startup and CI.
+The manual commands below remain available.
+
 With Python 3.11 and Node 22 installed, run from the repository root in PowerShell:
 
 ```powershell
@@ -124,7 +129,7 @@ See [startup evidence and limits](architecture/windows-core-startup.md).
 Run from a normal terminal with Homebrew installed:
 
 ```bash
-brew install python@3.11 node@22 ollama ffmpeg whisper-cpp portaudio libsndfile
+brew install python@3.11 node@22 ollama ffmpeg whisper.cpp portaudio libsndfile
 export PATH="$(brew --prefix node@22)/bin:$PATH"
 python3.11 --version
 node --version

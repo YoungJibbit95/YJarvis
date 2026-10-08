@@ -4,6 +4,7 @@ node_modules
 .env.*
 !.env.example
 .venv
+.setup-tools/
 runtime/*.db
 runtime/*.log
 runtime/audio/
