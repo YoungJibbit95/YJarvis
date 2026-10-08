@@ -1,4 +1,4 @@
-"""Domain isolation and the two explicitly allowed, unwired C1/C2 consumers."""
+"""Domain isolation and only the explicitly approved, unwired V2 consumers."""
 
 import ast
 import importlib.util
@@ -15,6 +15,7 @@ AGENT_PACKAGE = ROOT / "apps" / "agent" / "jarvis_agent"
 DOMAIN = AGENT_PACKAGE / "domain"
 TOOL_RUNTIME = AGENT_PACKAGE / "tool_runtime.py"
 PROVIDER_REGISTRY = AGENT_PACKAGE / "provider_registry.py"
+WINDOWS_URL_PROVIDER = AGENT_PACKAGE / "providers" / "windows" / "url_open.py"
 
 
 def test_domain_imports_only_stdlib_pydantic_and_itself():
@@ -48,16 +49,16 @@ def imported_names(path):
             yield from (f"{name}.{alias.name}" for alias in node.names)
 
 
-def test_legacy_runtime_has_no_domain_kernel_or_provider_registry_imports():
+def test_legacy_runtime_has_no_domain_kernel_registry_or_v2_provider_imports():
     # Ensure this test inspects a full repository, not a partial contract checkout.
     assert (AGENT_PACKAGE / "agent_service.py").is_file()
     for path in sorted(AGENT_PACKAGE.rglob("*.py")):
-        if DOMAIN in path.parents or path in {TOOL_RUNTIME, PROVIDER_REGISTRY}:
+        if DOMAIN in path.parents or path in {TOOL_RUNTIME, PROVIDER_REGISTRY, WINDOWS_URL_PROVIDER}:
             continue
         for name in imported_names(path):
             assert not any(name == forbidden or name.startswith(forbidden + ".")
                            for forbidden in ("jarvis_agent.domain", "jarvis_agent.tool_runtime",
-                                             "jarvis_agent.provider_registry")), (path, name)
+                                             "jarvis_agent.provider_registry", "jarvis_agent.providers")), (path, name)
 
 
 @pytest.mark.parametrize("path, extra", [
@@ -82,6 +83,28 @@ def test_kernel_and_registry_import_only_their_exact_semantic_dependencies(path,
         assert not (isinstance(value, str) and value.startswith("LEGACY_")), value
 
 
+def test_windows_url_provider_has_only_exact_native_and_contract_dependencies():
+    assert WINDOWS_URL_PROVIDER.is_file()
+    assert set(imported_names(WINDOWS_URL_PROVIDER)) <= {
+        "asyncio", "os", "sys", "pydantic", "pydantic.BaseModel",
+        "jarvis_agent.domain.action", "jarvis_agent.domain.action.CapabilityName",
+        "jarvis_agent.domain.tool_inputs", "jarvis_agent.domain.tool_inputs.UrlOpenInput",
+        "jarvis_agent.domain.tool_outputs", "jarvis_agent.domain.tool_outputs.NoDataOutput",
+    }
+    # No blanket exemption for providers/. Both package initializers stay inert.
+    for path in (AGENT_PACKAGE / "providers" / "__init__.py",
+                 AGENT_PACKAGE / "providers" / "windows" / "__init__.py"):
+        body = ast.parse(path.read_text(encoding="utf-8")).body
+        assert len(body) == 1 and isinstance(body[0], ast.Expr)
+        assert isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str)
+    for node in ast.walk(ast.parse(WINDOWS_URL_PROVIDER.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            if node.value.id in {"os", "sys", "asyncio"}:
+                assert (node.value.id, node.attr) in {
+                    ("os", "startfile"), ("sys", "platform"), ("asyncio", "to_thread"),
+                }
+
+
 def run_domain_probe(tmp_path, side_effect=""):
     program = textwrap.dedent(
         """
@@ -92,7 +115,8 @@ def run_domain_probe(tmp_path, side_effect=""):
 
         def forbid_runtime_access(event, args):
             if event in {"subprocess.Popen", "os.system", "os.posix_spawn",
-                         "socket.connect", "socket.bind", "sqlite3.connect"}:
+                         "socket.connect", "socket.bind", "sqlite3.connect",
+                         "os.startfile", "os.startfile/2"}:
                 raise AssertionError("Unexpected side effect: " + event)
             if event == "open":
                 _, mode, flags = args
@@ -167,6 +191,36 @@ def test_import_and_validation_do_not_access_runtime_services(tmp_path):
     result = run_domain_probe(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "isolated-domain-ok"
+
+
+def test_windows_provider_cold_import_and_registration_are_inert(tmp_path):
+    program = textwrap.dedent('''
+        from jarvis_agent.provider_registry import CapabilityProviderRegistry
+        registry = CapabilityProviderRegistry()
+        from jarvis_agent.providers.windows.url_open import WindowsUrlOpenProvider
+        provider = WindowsUrlOpenProvider()
+        assert registry.available_capabilities() == ()
+        registry.register("url.open", provider)
+        assert registry.available_capabilities() == ("url.open",)
+        assert registry.resolve("url.open") is provider
+        assert CapabilityProviderRegistry().available_capabilities() == ()
+        allowed = {"jarvis_agent.domain", "jarvis_agent.tool_runtime",
+                   "jarvis_agent.provider_registry", "jarvis_agent.providers",
+                   "jarvis_agent.providers.windows", "jarvis_agent.providers.windows.url_open"}
+        unexpected = [name for name in sys.modules if name.startswith("jarvis_agent.")
+                      and name not in allowed and not name.startswith("jarvis_agent.domain.")]
+        assert not unexpected, unexpected
+    ''')
+    result = run_domain_probe(tmp_path, program)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "isolated-domain-ok"
+
+
+@pytest.mark.parametrize("event", ["os.startfile", "os.startfile/2"])
+def test_probe_blocks_native_launch_audit_events_without_opening_a_browser(tmp_path, event):
+    result = run_domain_probe(tmp_path, f"sys.audit({event!r}, 'https://example.test', 'open')")
+    assert result.returncode != 0
+    assert "AssertionError: Unexpected side effect: " + event in result.stderr
 
 
 @pytest.mark.parametrize("use_registry", [False, True])
