@@ -1,4 +1,4 @@
-"""Domain isolation and the sole, unwired YJ2-05C1 runtime consumer."""
+"""Domain isolation and the two explicitly allowed, unwired C1/C2 consumers."""
 
 import ast
 import importlib.util
@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 AGENT_PACKAGE = ROOT / "apps" / "agent" / "jarvis_agent"
 DOMAIN = AGENT_PACKAGE / "domain"
 TOOL_RUNTIME = AGENT_PACKAGE / "tool_runtime.py"
+PROVIDER_REGISTRY = AGENT_PACKAGE / "provider_registry.py"
 
 
 def test_domain_imports_only_stdlib_pydantic_and_itself():
@@ -47,29 +48,34 @@ def imported_names(path):
             yield from (f"{name}.{alias.name}" for alias in node.names)
 
 
-def test_legacy_runtime_has_no_domain_or_tool_runtime_imports():
+def test_legacy_runtime_has_no_domain_kernel_or_provider_registry_imports():
     # Ensure this test inspects a full repository, not a partial contract checkout.
     assert (AGENT_PACKAGE / "agent_service.py").is_file()
     for path in sorted(AGENT_PACKAGE.rglob("*.py")):
-        if DOMAIN in path.parents or path == TOOL_RUNTIME:
+        if DOMAIN in path.parents or path in {TOOL_RUNTIME, PROVIDER_REGISTRY}:
             continue
         for name in imported_names(path):
             assert not any(name == forbidden or name.startswith(forbidden + ".")
-                           for forbidden in ("jarvis_agent.domain", "jarvis_agent.tool_runtime")), (path, name)
+                           for forbidden in ("jarvis_agent.domain", "jarvis_agent.tool_runtime",
+                                             "jarvis_agent.provider_registry")), (path, name)
 
 
-def test_tool_runtime_imports_only_its_exact_contract_and_semantic_catalog_dependencies():
-    assert TOOL_RUNTIME.is_file()
+@pytest.mark.parametrize("path, extra", [
+    (TOOL_RUNTIME, {"typing", "typing.Protocol"}),
+    (PROVIDER_REGISTRY, {"jarvis_agent.tool_runtime", "jarvis_agent.tool_runtime.ToolProvider"}),
+])
+def test_kernel_and_registry_import_only_their_exact_semantic_dependencies(path, extra):
+    assert path.is_file()
     allowed = {
-        "__future__", "__future__.annotations", "typing", "typing.Protocol",
+        "__future__", "__future__.annotations",
         "pydantic", "pydantic.BaseModel",
         "jarvis_agent.domain.action", "jarvis_agent.domain.action.CapabilityName",
         "jarvis_agent.domain.capability_catalog",
         "jarvis_agent.domain.capability_catalog.CAPABILITY_CATALOG",
     }
-    assert set(imported_names(TOOL_RUNTIME)) <= allowed
+    assert set(imported_names(path)) <= allowed | extra
     # No legacy view access via an attribute, name or dynamic string lookup either.
-    for node in ast.walk(ast.parse(TOOL_RUNTIME.read_text(encoding="utf-8"))):
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         value = (node.id if isinstance(node, ast.Name) else
                  node.attr if isinstance(node, ast.Attribute) else
                  node.value if isinstance(node, ast.Constant) else None)
@@ -163,7 +169,8 @@ def test_import_and_validation_do_not_access_runtime_services(tmp_path):
     assert result.stdout.strip() == "isolated-domain-ok"
 
 
-def test_tool_runtime_cold_import_and_fake_invocation_have_no_runtime_side_effects(tmp_path):
+@pytest.mark.parametrize("use_registry", [False, True])
+def test_tool_runtime_cold_import_and_fake_invocation_have_no_runtime_side_effects(tmp_path, use_registry):
     # Reuse the unchanged audit guard, installed before ANY domain/kernel import.
     # A synchronous fake coroutine needs no event-loop socket pair on Windows.
     program = textwrap.dedent('''
@@ -178,7 +185,19 @@ def test_tool_runtime_cold_import_and_fake_invocation_have_no_runtime_side_effec
                 return output_data
 
         provider = FakeProvider()
-        runtime = ToolRuntime(provider)
+        allowed_consumers = {"jarvis_agent.domain", "jarvis_agent.tool_runtime"}
+        if USE_REGISTRY:
+            from jarvis_agent.provider_registry import CapabilityProviderRegistry
+            registry = CapabilityProviderRegistry()
+            assert registry.available_capabilities() == ()
+            for capability in CAPABILITY_CATALOG:
+                registry.register(capability, provider)
+                assert registry.resolve(capability) is provider
+            assert registry.available_capabilities() == tuple(sorted(CAPABILITY_CATALOG))
+            runtime = ToolRuntime(registry)
+            allowed_consumers.add("jarvis_agent.provider_registry")
+        else:
+            runtime = ToolRuntime(provider)
 
         async def invoke_all():
             for name, capability in LEGACY_TOOL_TO_CAPABILITY.items():
@@ -198,11 +217,11 @@ def test_tool_runtime_cold_import_and_fake_invocation_have_no_runtime_side_effec
             invocation.close()
         assert provider.calls == 18
         unexpected = [name for name in sys.modules if name.startswith("jarvis_agent.")
-                      and name not in {"jarvis_agent.domain", "jarvis_agent.tool_runtime"}
+                      and name not in allowed_consumers
                       and not name.startswith("jarvis_agent.domain.")]
         assert not unexpected, unexpected
     ''')
-    result = run_domain_probe(tmp_path, program)
+    result = run_domain_probe(tmp_path, f"USE_REGISTRY = {use_registry!r}\n" + program)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "isolated-domain-ok"
 
