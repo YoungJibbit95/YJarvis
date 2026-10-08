@@ -155,6 +155,33 @@ def test_clipboard_write_provider_imports_only_exact_contract_and_native_depende
             assert node.func.id not in {"open", "exec", "eval", "__import__", "getattr"}
 
 
+def test_app_resolver_is_stdlib_only_without_any_domain_consumer_exemption():
+    path = AGENT_PACKAGE / "providers" / "windows" / "app_resolver.py"
+    assert path.is_file()
+    assert set(imported_names(path)) <= {
+        "os", "stat", "sys", "dataclasses", "dataclasses.dataclass",
+        "functools", "functools.cache", "pathlib", "pathlib.Path", "pathlib.PureWindowsPath",
+        "uuid", "uuid.UUID", "ctypes", "ctypes.wintypes",
+    }
+    attributes = {
+        "os": {"stat_result", "scandir"}, "sys": {"platform"},
+        "stat": {"S_ISLNK", "S_ISDIR", "S_ISREG", "FILE_ATTRIBUTE_REPARSE_POINT"},
+        "ctypes": {"Structure", "c_uint32", "c_uint16", "c_ubyte", "WinDLL", "POINTER",
+                   "c_void_p", "c_int32", "byref", "wstring_at"},
+        "wintypes": {"DWORD", "HANDLE", "LPCWSTR", "UINT"},
+        "shell32": {"SHGetKnownFolderPath"}, "ole32": {"CoTaskMemFree"},
+        "kernel32": {"GetDriveTypeW"},
+    }
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in attributes:
+            assert node.attr in attributes[node.value.id], (node.value.id, node.attr)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            assert node.func.id not in {"open", "exec", "eval", "__import__"}
+            if node.func.id == "getattr":
+                assert len(node.args) == 3 and isinstance(node.args[1], ast.Constant)
+                assert node.args[1].value == "st_file_attributes"
+
+
 def run_domain_probe(tmp_path, side_effect=""):
     program = textwrap.dedent(
         """

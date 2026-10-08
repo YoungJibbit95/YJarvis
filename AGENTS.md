@@ -5,20 +5,20 @@ and `CONTRIBUTING.md` before editing. The architecture describes a migration tar
 not capabilities already present in the legacy application.
 
 - Work only on the step explicitly authorized by the user. YJ2-00 through
-  YJ2-05C2 and YJW-00A/B/B.1/01A/01B are accepted; the current authorized step is YJW-01C:
-  one isolated Windows semantic clipboard.write provider, without production wiring.
+  YJ2-05C2 and YJW-00A/B/B.1/01A/01B/01C are accepted; the current authorized step is YJW-01D:
+  one read-only Windows Start Menu application resolver, without app launch or availability.
 - Use one branch and one PR per step. Never work directly on `main`, stack an
   unreviewed step, merge your own migration PR, or enable auto-merge.
 - The user explicitly authorized Codex for implementation on 2026-10-07,
   superseding the historical agent/tooling restriction in the architecture source.
   Use direct GitHub operations and normal tools; no agent delegation is required.
-- For YJW-01C, add only Unicode clipboard writing through ctypes/Win32, with an owned
-  invisible HWND, explicit HGLOBAL transfer and correct cleanup, plus tests and documentation. The legacy
+- For YJW-01D, resolve display names only against local Start Menu .lnk files from
+  Windows Known Folders, with deterministic matching and explicit ambiguity, plus tests and documentation. The legacy
   execution path, planner specs, approvals, routing and wire/DB names stay unchanged.
   Keep all accepted spec metadata and input/output models unchanged.
-  Do not begin apps/files providers, auto-discovery, adapters, production
+  Do not begin apps/files providers, provider auto-discovery, adapters, production
   wiring, planner availability, timeout enforcement, Observations, persistence/events,
-  policy, UI/voice, packaging, YJW-01D or YJ2-05C3. Import never grants availability.
+  policy, UI/voice, packaging, YJW-01E or YJ2-05C3. Import never grants availability.
 - Read `docs/architecture/02_WINDOWS_CROSS_PLATFORM_ARCHITECTURE_ADDENDUM.md`.
   Core code stays OS-neutral; platform startup code belongs at the process boundary.
 - Keep each cycle small and independently reviewable, with exactly one releasable
