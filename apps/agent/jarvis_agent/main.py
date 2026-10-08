@@ -51,7 +51,7 @@ agent_service = AgentService(
 smarthome_provider = HomeAssistantStubProvider(database)
 
 app = FastAPI(title="Jarvis Local Agent", version="0.1.0")
-app.include_router(create_setup_router(database.get_settings, config.default_whisper_model))
+app.include_router(create_setup_router(database.get_settings, config.default_whisper_model, config.runtime_dir))
 
 app.add_middleware(
     CORSMiddleware,
