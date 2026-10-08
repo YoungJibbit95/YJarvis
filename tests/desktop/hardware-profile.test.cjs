@@ -6,7 +6,7 @@ const { load } = require("./load-setup.cjs");
 const { parseHardwareProfile } = load("hardwareProfile.ts");
 const { HardwareProfileContent } = load("HardwareProfileView.tsx", { "../api": {
   fetchHardwareProfile() { throw new Error("Presentation must not fetch"); }
-} });
+}, "./AcceleratorProfileView": { AcceleratorProfileView: () => null } });
 
 const fixture = () => ({ platform: "windows", architecture: "x86_64", logical_cpu_count: 12,
   total_memory_bytes: 32 * 1024 ** 3, available_storage_bytes: 420 * 1024 ** 3,
