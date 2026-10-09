@@ -127,12 +127,16 @@ test("actual chat API distinguishes definite HTTP rejection from uncertain trans
   let failKind = "http";
   const { api } = mockedApi(async () => {
     if (failKind === "network") throw new Error("connection reset");
+    if (failKind === "server") return { ok: false, status: 503, text: async () => '{"detail":"busy"}' };
     if (failKind === "json") return { ok: true, json: async () => { throw new Error("truncated"); } };
     if (failKind === "success") return { ok: true, json: async () => ({ run_id: "run-5" }) };
-    return { ok: false, status: 503, text: async () => '{"detail":"unavailable"}' };
+    return { ok: false, status: 422, text: async () => '{"detail":"unavailable"}' };
   });
   await assert.rejects(() => api.sendChat("session", "hello"),
     (error) => error.outcome === "rejected");
+  failKind = "server";
+  await assert.rejects(() => api.sendChat("session", "hello"),
+    (error) => error.outcome === "unknown");
   failKind = "network";
   await assert.rejects(() => api.sendChat("session", "hello"),
     (error) => error.outcome === "unknown");

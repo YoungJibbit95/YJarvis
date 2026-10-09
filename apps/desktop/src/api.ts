@@ -167,7 +167,9 @@ export async function sendChat(sessionId: string, message: string): Promise<{ ru
   }
   if (!response.ok) {
     const details = await readErrorDetails(response, `HTTP ${response.status}`);
-    throw new ChatSubmissionError(`Chat wurde abgelehnt: ${details}`, "rejected");
+    // 5xx/408/429 might follow a committed run when a gateway drops the ACK.
+    const outcome = response.status >= 500 || [408, 429].includes(response.status) ? "unknown" : "rejected";
+    throw new ChatSubmissionError(`Chat ${outcome === "unknown" ? "nicht bestätigt" : "wurde abgelehnt"}: ${details}`, outcome);
   }
   try {
     const result: unknown = await response.json();

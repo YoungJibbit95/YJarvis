@@ -28,7 +28,7 @@ async function makeHarness(overrides = {}) {
       }];
     },
     useRef(value) { return slots[cursor++] ??= { current: value }; },
-    useMemo: (fn) => fn(), useCallback: (fn) => fn(),
+    useMemo: (fn) => fn(), useCallback: (fn) => fn,
     useDeferredValue: (val) => val, useTransition: () => [false, (fn) => fn()],
     useEffect(callback, deps) {
       const id = cursor++, prev = slots[id];
@@ -122,13 +122,17 @@ async function makeHarness(overrides = {}) {
     cancelAnimationFrame() {}
   });
   async function settle() {
-    for (let i = 0; i < 45; i++) {
-      await Promise.resolve();
-      if (dirty) {
-        dirty = false; cursor = 0;
-        tree = App({ setupCheck, onRecheckSetup: async () => {} });
-        effects.splice(0).forEach((run) => run());
+    for (let round = 0; round < 3; round++) {
+      for (let i = 0; i < 30; i++) {
+        await Promise.resolve();
+        if (dirty) {
+          dirty = false; cursor = 0;
+          tree = App({ setupCheck, onRecheckSetup: async () => {} });
+          effects.splice(0).forEach((run) => run());
+        }
       }
+      // Node Blob.text() and simulated recorder callbacks may need an event-loop turn.
+      await new Promise((resolve) => setImmediate(resolve));
     }
   }
   const find = (predicate) => nodes(tree).find(predicate);
