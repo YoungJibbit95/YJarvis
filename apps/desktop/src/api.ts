@@ -158,7 +158,9 @@ export async function sendChat(sessionId: string, message: string): Promise<{ ru
     response = await fetch(`${API_BASE}/v1/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, message })
+      body: JSON.stringify({ session_id: sessionId, message }),
+      // A stalled ACK is uncertain, not permission to issue another agent run.
+      signal: AbortSignal.timeout(60_000)
     });
   } catch (error) {
     // The backend may have committed a run before an HTTP acknowledgement was lost.

@@ -35,9 +35,10 @@ import type { SetupCheck } from "./setup/types";
 import { GuidedInstaller } from "./setup/GuidedInstaller";
 import { ChatSubmissionError } from "./api";
 import {
-  OrderedSegmentProcessor,
+  TerminalRunHistory,
+  VoiceActivation,
   VoiceSubmissionQueue,
-  WakeCommandWindow,
+  nextLocalMessageId,
   type VoiceSubmission
 } from "./voice/voiceReliability";
 
@@ -63,6 +64,10 @@ type TimelineEntry = {
 type CaptureStopReason = "silence" | "max" | "manual" | "tts" | "cancel";
 type RecordedCapture = {
   id: number;
+  activation: VoiceActivation;
+  sequence: number;
+  assistantTextAtStart: string;
+  recentAssistantAtStart: number;
   recorder: MediaRecorder;
   chunks: Blob[];
   startedAt: number;
@@ -70,6 +75,12 @@ type RecordedCapture = {
   hadSpeech: boolean;
   stopReason: CaptureStopReason | null;
   finalized: boolean;
+};
+
+type ActiveChatRun = {
+  source: "text" | "voice";
+  runId: string | null;
+  interrupted: boolean;
 };
 
 function whisperSetupHint(reason: string): string {
@@ -150,8 +161,10 @@ const QUICK_ACTIONS: Array<{ label: string; prompt: string }> = [
   }
 ];
 
+let lastLocalMessageId = 0;
 function uniqueMessageId() {
-  return Date.now() + Math.floor(Math.random() * 1000);
+  lastLocalMessageId = nextLocalMessageId(lastLocalMessageId, Date.now());
+  return lastLocalMessageId;
 }
 
 function pickRecorderMimeType(): string | undefined {
@@ -194,6 +207,18 @@ function isLikelyEchoTranscript(transcript: string, spokenAssistantText: string)
   }
 
   return false;
+}
+
+function isRecentShortAssistantWakeEcho(
+  transcript: string,
+  assistantText: string,
+  assistantAt: number,
+  capturedAt: number
+): boolean {
+  const normalized = normalizeForEchoCheck(transcript);
+  const assistant = normalizeForEchoCheck(assistantText);
+  return WAKE_WORD_ONLY_PATTERNS.includes(normalized) && assistant.startsWith(normalized) &&
+    assistantAt > 0 && capturedAt >= assistantAt && capturedAt - assistantAt <= 1_200;
 }
 
 function shouldIgnoreTranscriptArtifact(text: string): boolean {
@@ -469,11 +494,14 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
   const ttsPlaybackActiveRef = useRef(false);
   const suppressVoiceInputUntilRef = useRef(0);
   const lastAssistantSpokenTextRef = useRef("");
+  const lastAssistantSpeechAtRef = useRef(0);
+  const activeChatRunRef = useRef<ActiveChatRun | null>(null);
+  const terminalRunsRef = useRef(new TerminalRunHistory());
+  const [runUncertain, setRunUncertain] = useState(false);
 
   const voiceQueueRef = useRef(new VoiceSubmissionQueue());
   const voiceFlushRunningRef = useRef(false);
-  const wakeWindowRef = useRef(new WakeCommandWindow());
-  const segmentOrderRef = useRef(new OrderedSegmentProcessor());
+  const voiceActivationRef = useRef<VoiceActivation | null>(null);
   const ttsQueueRef = useRef<string[]>([]);
   const ttsQueueRunningRef = useRef(false);
   const spokenOffsetByRunRef = useRef<Record<string, number>>({});
@@ -606,12 +634,14 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
 
     try {
       lastAssistantSpokenTextRef.current = nextChunk;
+      lastAssistantSpeechAtRef.current = Date.now();
       await speak(nextChunk);
     } catch (error) {
       reportFailure("voice", "Sprachausgabe fehlgeschlagen", error);
     } finally {
       ttsPlaybackActiveRef.current = false;
       ttsQueueRunningRef.current = false;
+      lastAssistantSpeechAtRef.current = Date.now();
       suppressVoiceInputFor(TTS_INPUT_SUPPRESSION_POSTPLAY_MS);
       resumeRecorderAfterSuppression();
       syncAssistantMode();
@@ -742,17 +772,68 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
 
   function releaseBusyLock() {
     clearBusyWatchdog();
+    activeChatRunRef.current = null;
+    setRunUncertain(false);
     busyRef.current = false;
     setBusy(false);
     syncAssistantMode();
   }
 
-  function armBusyWatchdog() {
+  function noteTerminalRun(runId: string, state: "done" | "error") {
+    terminalRunsRef.current.remember(runId, state);
+    const active = activeChatRunRef.current;
+    // Events belonging to older or unrelated runs must never release this run.
+    if (!active || active.runId !== runId) return;
+    releaseBusyLock();
+    if (active.source === "voice") {
+      setVoiceStage(state === "done" ? "Agent-Run abgeschlossen" : "Agent-Run fehlgeschlagen");
+    }
+  }
+
+  function registerRunAcknowledgement(active: ActiveChatRun, runId: string) {
+    if (activeChatRunRef.current !== active) return;
+    active.runId = runId;
+    const earlyTerminal = terminalRunsRef.current.get(runId);
+    if (earlyTerminal) {
+      // WebSocket can beat /v1/chat HTTP. No watchdog for a finished run.
+      noteTerminalRun(runId, earlyTerminal);
+      return;
+    }
+    if (active.interrupted) {
+      setRunUncertain(true);
+      if (active.source === "voice") {
+        setVoiceStage("Agent-Run angenommen · Abschluss nach Verbindungsabbruch unbekannt");
+      }
+      return;
+    }
+    armBusyWatchdog(runId);
+  }
+
+  function armBusyWatchdog(runId: string) {
     clearBusyWatchdog();
     busyWatchdogTimerRef.current = window.setTimeout(() => {
-      releaseBusyLock();
-      reportFailure("chat", "Antwort-Timeout", "Antwort-Timeout erreicht, Sprachqueue wird fortgesetzt.");
+      const active = activeChatRunRef.current;
+      if (!active || active.runId !== runId || terminalRunsRef.current.get(runId)) return;
+      // Timeout does not prove server completion; retain the voice queue lock.
+      active.interrupted = true;
+      setRunUncertain(true);
+      if (active.source === "voice") {
+        setVoiceStage("Agent-Run nicht bestätigt · Warteschlange pausiert");
+      }
+      reportFailure("chat", "Agent-Abschluss nicht bestätigt",
+        "Der Agent-Run hat seit 45 Sekunden keinen nachgewiesenen Abschluss. Bitte Run prüfen.");
     }, RUN_COMPLETION_TIMEOUT_MS);
+  }
+
+  function continueAfterManualRunCheck() {
+    const active = activeChatRunRef.current;
+    if (!active?.interrupted || !active.runId) return;
+    if (!window.confirm(
+      "Der angenommene Agent-Run könnte noch arbeiten. Hast du seinen Status geprüft und möchtest " +
+      "die nächsten Befehle trotzdem bewusst freigeben?"
+    )) return;
+    setVoiceStage("Run-Status vom Benutzer geprüft · Warteschlange freigegeben");
+    releaseBusyLock();
   }
 
   async function refreshApprovals() {
@@ -814,10 +895,12 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     voiceModeEnabledRef.current = false;
     setVoiceModeEnabled(false);
     requestRecorderStop(cancel ? "cancel" : "manual");
-    if (cancel) {
-      segmentOrderRef.current.cancel();
-      wakeWindowRef.current.reset();
-    }
+    const activation = voiceActivationRef.current;
+    voiceActivationRef.current = null;
+    // Do not reset a stopped generation's wake permission: its already-recorded
+    // segments may still need to finish STT in capture order after Stop.
+    // The next Start always gets an independent VoiceActivation.
+    if (cancel) activation?.cancel();
 
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -841,6 +924,8 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
 
     busyRef.current = true;
     setBusy(true);
+    const active: ActiveChatRun = { source, runId: null, interrupted: false };
+    activeChatRunRef.current = active;
     syncAssistantMode();
 
     if (source === "text") {
@@ -858,11 +943,11 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     ]);
 
     try {
-      await sendChat(sessionId, trimmed);
-      armBusyWatchdog();
+      const acknowledged = await sendChat(sessionId, trimmed);
+      registerRunAcknowledgement(active, acknowledged.run_id);
       return true;
     } catch (error) {
-      releaseBusyLock();
+      if (activeChatRunRef.current === active) releaseBusyLock();
       reportFailure("chat", "Nachricht konnte nicht gesendet werden", error);
       return false;
     }
@@ -881,6 +966,8 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     refreshVoiceEntries();
     busyRef.current = true;
     setBusy(true);
+    const active: ActiveChatRun = { source: "voice", runId: null, interrupted: false };
+    activeChatRunRef.current = active;
     setVoiceStage("Befehl wird an den Agent gesendet");
     syncAssistantMode();
     try {
@@ -896,8 +983,12 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
           created_at: new Date().toISOString()
         }];
       });
-      setVoiceStage("Befehl vom Agent angenommen");
-      armBusyWatchdog();
+      registerRunAcknowledgement(active, acknowledged.run_id);
+      if (activeChatRunRef.current === active) {
+        setVoiceStage(active.interrupted
+          ? "Agent-Run angenommen · Abschluss nach Verbindungsabbruch unbekannt"
+          : "Befehl vom Agent angenommen");
+      }
     } catch (error) {
       const rejected = error instanceof ChatSubmissionError && error.outcome === "rejected";
       voiceQueueRef.current.settle(next.id, rejected ? "failed" : "pending",
@@ -905,7 +996,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       setVoiceStage(rejected
         ? "Chat hat den Befehl abgelehnt · erneutes Senden möglich"
         : "Übermittlung unklar · bitte vor erneutem Senden prüfen");
-      releaseBusyLock();
+      if (activeChatRunRef.current === active) releaseBusyLock();
       reportFailure("chat", "Sprachbefehl nicht bestätigt", error);
     } finally {
       voiceFlushRunningRef.current = false;
@@ -945,7 +1036,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     }
   }
 
-  async function handleRecordedSegment(blob: Blob, speechStartedAt: number, segmentId: number) {
+  async function handleRecordedSegment(blob: Blob, capture: RecordedCapture) {
     if (blob.size === 0 || voiceDisposedRef.current) return;
     try {
       setStatus("Transkribiere Audio lokal...");
@@ -959,7 +1050,12 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
         return;
       }
       setVoiceTranscriptPreview(text);
-      if (isLikelyEchoTranscript(text, lastAssistantSpokenTextRef.current)) {
+      // Echo comparison uses the assistant audio that existed when the microphone
+      // recorded this segment, not a newer TTS chunk spoken during slow Whisper.
+      if (isLikelyEchoTranscript(text, capture.assistantTextAtStart) ||
+          isRecentShortAssistantWakeEcho(
+            text, capture.assistantTextAtStart, capture.recentAssistantAtStart, capture.startedAt
+          )) {
         setVoiceStage("Eigenes Lautsprecher-Echo verworfen");
         return;
       }
@@ -967,19 +1063,24 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
         setVoiceStage("Unsichere Spracherkennung verworfen");
         return;
       }
-      const decision = wakeWindowRef.current.accept(text, speechStartedAt);
+      const decision = capture.activation.wake.accept(text, capture.speechStartedAt ?? capture.startedAt);
+      const isCurrentActivation = voiceActivationRef.current === capture.activation;
       if (decision.kind === "wake") {
-        setVoiceStage("Wakeword erkannt · Warte auf Folgebefehl (8 Sekunden)");
-        setStatus("Jarvis erkannt. Bitte jetzt den Auftrag sprechen.");
+        if (isCurrentActivation) {
+          setVoiceStage("Wakeword erkannt · Warte auf Folgebefehl (8 Sekunden)");
+          setStatus("Jarvis erkannt. Bitte jetzt den Auftrag sprechen.");
+        }
         return;
       }
       if (decision.kind === "ignored") {
-        setVoiceStage("Ohne Wakeword ignoriert · bitte „Jarvis“ sagen");
-        setStatus("Ignoriert: Bitte zuerst „Jarvis“ sagen.");
+        if (isCurrentActivation) {
+          setVoiceStage("Ohne Wakeword ignoriert · bitte „Jarvis“ sagen");
+          setStatus("Ignoriert: Bitte zuerst „Jarvis“ sagen.");
+        }
         return;
       }
       setStatus(`Erkannt (${result.latency_ms} ms): ${decision.command}`);
-      enqueueVoiceMessage(String(uniqueMessageId()), text, decision.command, speechStartedAt);
+      enqueueVoiceMessage(String(uniqueMessageId()), text, decision.command, capture.speechStartedAt ?? capture.startedAt);
     } catch (error) {
       if (voiceDisposedRef.current) return;
       setVoiceStage("Whisper-Fehler · bitte Eingabe erneut sprechen");
@@ -1009,9 +1110,15 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     const mimeType = pickRecorderMimeType();
     const recorderOptions: MediaRecorderOptions = { audioBitsPerSecond: 128_000 };
     if (mimeType) recorderOptions.mimeType = mimeType;
+    const activation = voiceActivationRef.current;
+    if (!activation) return;
     const recorder = new MediaRecorder(stream, recorderOptions);
     const capture: RecordedCapture = {
       id: ++captureCounterRef.current,
+      activation,
+      sequence: activation.allocateSegment(),
+      assistantTextAtStart: lastAssistantSpokenTextRef.current,
+      recentAssistantAtStart: lastAssistantSpeechAtRef.current,
       recorder,
       chunks: [],
       startedAt: Date.now(),
@@ -1049,11 +1156,11 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       const eligible = capture.stopReason !== "cancel" && blob.size > 0 &&
         (capture.hadSpeech || (capture.stopReason === "manual" && duration >= MIN_SEGMENT_MS));
       if (eligible) {
-        segmentOrderRef.current.complete(capture.id, async () => {
-          await handleRecordedSegment(blob, capture.speechStartedAt ?? capture.startedAt, capture.id);
+        capture.activation.segments.complete(capture.sequence, async () => {
+          await handleRecordedSegment(blob, capture);
         });
       } else {
-        segmentOrderRef.current.skip(capture.id);
+        capture.activation.segments.skip(capture.sequence);
       }
       if (voiceModeEnabledRef.current && mediaStreamRef.current) resumeRecorderAfterSuppression();
     };
@@ -1064,7 +1171,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       if (activeCaptureRef.current === capture) activeCaptureRef.current = null;
       if (mediaRecorderRef.current === recorder) mediaRecorderRef.current = null;
       capture.finalized = true;
-      segmentOrderRef.current.skip(capture.id);
+      capture.activation.segments.skip(capture.sequence);
       throw error;
     }
   }
@@ -1178,6 +1285,8 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       analyserRef.current = analyser;
       analyserDataRef.current = new Uint8Array(analyser.fftSize);
       mediaStreamRef.current = stream;
+      // Fresh permission on every activation, never inherited across Stop/Start.
+      voiceActivationRef.current = new VoiceActivation(attempt);
       voiceModeEnabledRef.current = true;
       setVoiceModeEnabled(true);
       startRecorderSegment();
@@ -1378,7 +1487,6 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
 
   useEffect(() => {
     voiceDisposedRef.current = false;
-    segmentOrderRef.current = new OrderedSegmentProcessor();
     let cancelled = false;
 
     async function bootstrap() {
@@ -1492,12 +1600,19 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       socket = nextSocket;
 
       nextSocket.onopen = () => {
-        if (!cancelled && socket === nextSocket) setConnection({ phase: "connected" });
+        if (cancelled || socket !== nextSocket) return;
+        setConnection({ phase: "connected" });
         reconnectAttempt = 0;
-        setStatus(`Verbunden mit Agent (${sessionId})`);
+        if (activeChatRunRef.current?.interrupted) {
+          setRunUncertain(true);
+          setStatus("Agent wieder verbunden. Der vorherige Run-Abschluss ist noch ungeklärt.");
+        } else {
+          setStatus(`Verbunden mit Agent (${sessionId})`);
+        }
       };
 
       nextSocket.onmessage = (event) => {
+        if (cancelled || socket !== nextSocket) return;
         const payload = JSON.parse(event.data) as StreamEvent;
 
         if (payload.event === "token") {
@@ -1524,7 +1639,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
           ]);
 
           if (payload.role === "assistant") {
-            releaseBusyLock();
+            // A message is not a terminal run_state and might belong to another run.
             if (voiceRepliesEnabledRef.current) {
               enqueueStreamingSpeechForRun(payload.run_id, payload.content, { flushTail: true });
             }
@@ -1552,7 +1667,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
           }
 
           if (payload.state === "done" || payload.state === "error") {
-            releaseBusyLock();
+            noteTerminalRun(payload.run_id, payload.state);
             clearStreamingSpeechForRun(payload.run_id);
             refreshApprovals().catch((error) => reportFailure("action", "Freigaben konnten nicht geladen werden", error));
           }
@@ -1569,7 +1684,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       };
 
       nextSocket.onclose = () => {
-        if (cancelled) {
+        if (cancelled || socket !== nextSocket) {
           return;
         }
         clearTokenFlushTimer();
@@ -1577,8 +1692,15 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
         thinkingRunsRef.current.clear();
         spokenOffsetByRunRef.current = {};
         syncAssistantMode();
-        if (busyRef.current) {
-          releaseBusyLock();
+        const active = activeChatRunRef.current;
+        if (active) {
+          active.interrupted = true;
+          clearBusyWatchdog();
+          setRunUncertain(true);
+          setStatus("Agent-Verbindung unterbrochen · aktiver Run bleibt gesperrt.");
+          if (active.source === "voice") {
+            setVoiceStage("Agent-Verbindung unterbrochen · weitere Sprachbefehle warten");
+          }
         }
         scheduleReconnect();
       };
@@ -1708,11 +1830,21 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
               </div>
               <small>„Jarvis, öffne …“ oder „Jarvis“ und anschließend den Auftrag sagen.</small>
             </div>
-            {(voiceModeEnabled || voiceStage || voiceEntries.length > 0 || voiceTranscriptPreview) && (
+            {(voiceModeEnabled || voiceStage || voiceEntries.length > 0 || voiceTranscriptPreview || runUncertain) && (
               <div className="voice-reliability-panel" aria-label="Sprachverarbeitung">
                 <p role="status" aria-live="polite">
                   {voiceStage || (voiceModeEnabled ? "Mikrofon aktiv" : "Mikrofon aus")}
                 </p>
+                {runUncertain && (
+                  <div>
+                    <p>Angenommener Agent-Run ohne bestätigten Abschluss. Nachfolgende Befehle warten.</p>
+                    <button type="button" className="secondary"
+                      disabled={!activeChatRunRef.current?.runId}
+                      onClick={continueAfterManualRunCheck}>
+                      Run prüfen und bewusst fortsetzen
+                    </button>
+                  </div>
+                )}
                 {voiceTranscriptPreview && (
                   <p className="voice-final-transcript">Letztes Transkript: {voiceTranscriptPreview}</p>
                 )}

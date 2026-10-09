@@ -1,8 +1,10 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { load } = require("./load-setup.cjs");
-const { WakeCommandWindow, OrderedSegmentProcessor, VoiceSubmissionQueue, recordingFileName } =
-  load("../voice/voiceReliability.ts");
+const {
+  WakeCommandWindow, VoiceActivation, OrderedSegmentProcessor, TerminalRunHistory,
+  nextLocalMessageId, VoiceSubmissionQueue, recordingFileName
+} = load("../voice/voiceReliability.ts");
 
 test("combined Jarvis utterance, two segments, no-wake block and consumed permission", () => {
   const window = new WakeCommandWindow(8000);
@@ -168,3 +170,44 @@ function mockedApi(handler) {
   }, { filename: file });
   return { api: exports, calls };
 }
+
+
+test("HIGH: each voice activation has isolated wake permission and capture order", async () => {
+  const old = new VoiceActivation(11);
+  const newer = new VoiceActivation(12);
+  assert.equal(old.allocateSegment(), 1);
+  assert.equal(old.allocateSegment(), 2);
+  assert.equal(newer.allocateSegment(), 1);
+  assert.equal(old.wake.accept("Jarvis", 1000).kind, "wake");
+  assert.equal(newer.wake.accept("Öffne Spotify", 1200).kind, "ignored");
+  const olderWork = [];
+  old.segments.complete(2, async () => {
+    olderWork.push(old.wake.accept("Öffne Spotify", 2000).kind);
+  });
+  old.segments.complete(1, async () => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(olderWork, ["command"]);
+  assert.equal(newer.wake.accept("Öffne Notizen", 2000).kind, "ignored");
+  old.cancel();
+  assert.equal(old.wake.accept("Öffne Spotify", 2200).kind, "ignored");
+});
+
+test("MEDIUM: bounded terminal history retains only recent matching run IDs", () => {
+  const history = new TerminalRunHistory(3);
+  for (let n = 0; n < 20; n++) history.remember("run-" + n, n % 2 ? "error" : "done");
+  assert.equal(history.size, 3);
+  assert.equal(history.get("run-0"), undefined);
+  assert.equal(history.get("run-19"), "error");
+  assert.equal(history.get("run-18"), "done");
+  history.remember("run-19", "done");
+  assert.equal(history.get("run-19"), "done");
+  assert.equal(history.size, 3);
+});
+
+test("LOW: local numeric IDs never collide with frozen time and fixed randomness", () => {
+  const random = () => 0.25;
+  const first = nextLocalMessageId(0, 12345 + random() * 0);
+  const second = nextLocalMessageId(first, 12345 + random() * 0);
+  const third = nextLocalMessageId(second, 12345);
+  assert.deepEqual([first, second, third], [12345, 12346, 12347]);
+});

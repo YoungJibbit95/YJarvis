@@ -16,7 +16,7 @@ async function makeHarness(overrides = {}) {
   let cursor = 0, dirty = true, tree, timerSeq = 0, clock = 1000;
   let level = 128, rejectResume = false, confirmedRetry = false;
   let setupCheck = { state: "degraded", backendReachable: true };
-  const slots = [], effects = [], timers = new Map(), frames = [], recorders = [], tracks = [], sends = [], transcriptions = [];
+  const slots = [], effects = [], timers = new Map(), frames = [], recorders = [], tracks = [], sends = [], transcriptions = [], sockets = [];
   const mockReact = {
     ...React, memo: (component) => component,
     useState(init) {
@@ -72,8 +72,11 @@ async function makeHarness(overrides = {}) {
   class Socket {
     static OPEN = 1; static CONNECTING = 0;
     readyState = 0;
-    constructor(url) { this.url = url; }
+    constructor(url) { this.url = url; sockets.push(this); }
     close() { this.readyState = 3; }
+    open() { this.readyState = 1; this.onopen?.(); }
+    disconnect() { this.readyState = 3; this.onclose?.(); }
+    event(payload) { this.onmessage?.({ data: JSON.stringify(payload) }); }
   }
   const stream = { getTracks: () => tracks };
   tracks.push({ stopped: false, stop() { this.stopped = true; } });
@@ -117,6 +120,7 @@ async function makeHarness(overrides = {}) {
     "./setup/GuidedInstaller": { GuidedInstaller: () => null }
   }, {
     Date: Clock, Blob, Error, MediaRecorder: Recorder, WebSocket: Socket,
+    Math: Object.assign(Object.create(Math), { random: () => 0.42 }),
     window, navigator: { mediaDevices: { getUserMedia: async () => stream } },
     requestAnimationFrame(fn) { frames.push(fn); return frames.length; },
     cancelAnimationFrame() {}
@@ -140,7 +144,18 @@ async function makeHarness(overrides = {}) {
   const recordButton = () => find((node) => node.type === "button" &&
     typeof node.props?.className === "string" && node.props.className.includes("record"));
   return {
-    sends, transcriptions, recorders, tracks, api, find, settle,
+    sends, transcriptions, recorders, tracks, sockets, api, find, settle,
+    socket() { return sockets.at(-1); },
+    async openSocket() { this.socket().open(); await settle(); },
+    async closeSocket() { this.socket().disconnect(); await settle(); },
+    async socketEvent(event, run_id, state, content = "") {
+      this.socket().event(event === "run_state"
+        ? { event, run_id, state, timestamp: new Date(clock).toISOString() }
+        : { event, run_id, role: "assistant", content, timestamp: new Date(clock).toISOString() });
+      await settle();
+    },
+    hasTimer(duration) { return [...timers.values()].some((t) => t.duration === duration); },
+    clock() { return clock; },
     async start() { recordButton().props.onClick(); await settle(); },
     async stop() { recordButton().props.onClick(); await settle(); },
     async finish(payload, options = {}) {
@@ -162,6 +177,7 @@ async function makeHarness(overrides = {}) {
       await settle();
     },
     setClock(ms) { clock = ms; },
+    advance(ms) { clock += ms; },
     async setup(state) { setupCheck = { state, backendReachable: state !== "checking" }; dirty = true; await settle(); },
     setConfirmedRetry(value) { confirmedRetry = value; },
     setResumeFailure() { rejectResume = true; },
@@ -262,4 +278,258 @@ test("real App: AudioContext failure releases all microphone tracks", async () =
   await app.start();
   assert.equal(app.tracks[0].stopped, true);
   assert.equal(app.recorders.length, 0);
+});
+
+
+test("HIGH: stop/restart requires a fresh wakeword before accepting a command", async () => {
+  const app = await makeHarness();
+  await app.start();
+  await app.finish("Jarvis");
+  await app.stop();
+  await app.start();
+  await app.finish("Öffne Spotify");
+  assert.deepEqual(app.sends, []);
+  assert.match(app.visible(), /Ohne Wakeword ignoriert/);
+  await app.timer(80);
+  await app.finish("Jarvis, öffne Spotify");
+  assert.deepEqual(app.sends.map((entry) => entry.message), ["öffne Spotify"]);
+});
+
+test("HIGH: captured follow-up completes exactly once after manual Stop during Whisper", async () => {
+  let resolveFollowup;
+  const app = await makeHarness({
+    transcribe: async (blob) => {
+      const text = await blob.text();
+      if (text === "Öffne Spotify") {
+        return await new Promise((resolve) => { resolveFollowup = resolve; });
+      }
+      return { text, language: "de", latency_ms: 7 };
+    }
+  });
+  await app.start();
+  await app.finish("Jarvis");
+  await app.timer(80);
+  app.recorders.at(-1).payload = "Öffne Spotify";
+  app.frame(60, 160);
+  await app.stop();
+  assert.equal(app.sends.length, 0);
+  resolveFollowup({ text: "Öffne Spotify", language: "de", latency_ms: 30 });
+  await app.settle();
+  assert.deepEqual(app.sends.map((entry) => entry.message), ["Öffne Spotify"]);
+  await app.settle();
+  assert.equal(app.sends.length, 1);
+});
+
+test("HIGH: old delayed wake STT cannot arm a restarted capture activation", async () => {
+  let resolveOld;
+  let first = true;
+  const app = await makeHarness({
+    transcribe: async (blob) => {
+      const text = await blob.text();
+      if (first) {
+        first = false;
+        return await new Promise((resolve) => { resolveOld = resolve; });
+      }
+      return { text, language: "de", latency_ms: 7 };
+    }
+  });
+  await app.start();
+  await app.finish("Jarvis");
+  await app.stop();
+  await app.start();
+  await app.finish("Öffne Spotify");
+  resolveOld({ text: "Jarvis", language: "de", latency_ms: 800 });
+  await app.settle();
+  await app.timer(80);
+  await app.finish("Öffne Notizen");
+  assert.deepEqual(app.sends, []);
+});
+
+test("MEDIUM: WebSocket disconnect pauses accepted voice Run; reconnect is not completion", async () => {
+  const app = await makeHarness();
+  await app.openSocket();
+  await app.start();
+  await app.finish("Jarvis, öffne Spotify");
+  assert.equal(app.sends.length, 1);
+  await app.closeSocket();
+  await app.timer(80);
+  await app.finish("Jarvis, öffne Notizen");
+  assert.equal(app.sends.length, 1);
+  assert.match(app.visible(), /Warteschlange|Nachfolgende Befehle/);
+  await app.timer(350);
+  await app.openSocket();
+  assert.equal(app.sends.length, 1);
+  await app.socketEvent("run_state", "unrelated-run", "done");
+  assert.equal(app.sends.length, 1);
+  await app.socketEvent("run_state", "run-1", "done");
+  assert.deepEqual(app.sends.map((entry) => entry.message),
+    ["öffne Spotify", "öffne Notizen"]);
+});
+
+test("MEDIUM: foreign/late terminal events never unlock the active voice submission", async () => {
+  const app = await makeHarness();
+  await app.openSocket();
+  await app.start();
+  await app.finish("Jarvis, öffne Spotify");
+  await app.timer(80);
+  await app.finish("Jarvis, öffne Notizen");
+  await app.socketEvent("run_state", "run-from-past-session", "done");
+  assert.equal(app.sends.length, 1);
+  await app.socketEvent("run_state", "run-1", "done");
+  assert.equal(app.sends.length, 2);
+  await app.socketEvent("run_state", "run-1", "done");
+  await app.socketEvent("run_state", "unrelated-run", "error");
+  assert.equal(app.sends.length, 2);
+  assert.equal(app.hasTimer(45_000), true); // Second run must still own its watchdog.
+});
+
+test("MEDIUM: run_state done before HTTP acknowledgement does not start a stale watchdog", async () => {
+  let resolveAck;
+  const posts = [];
+  const app = await makeHarness({
+    sendChat: async (_session, message) => {
+      posts.push(message);
+      return await new Promise((resolve) => { resolveAck = resolve; });
+    }
+  });
+  await app.openSocket();
+  await app.start();
+  await app.finish("Jarvis, öffne Spotify");
+  assert.deepEqual(posts, ["öffne Spotify"]);
+  await app.socketEvent("run_state", "fast-run", "done");
+  resolveAck({ run_id: "fast-run" });
+  await app.settle();
+  assert.equal(app.hasTimer(45_000), false);
+  await app.timer(80);
+  await app.finish("Jarvis, öffne Notizen");
+  assert.deepEqual(posts, ["öffne Spotify", "öffne Notizen"]);
+});
+
+test("MEDIUM: run_state error before HTTP acknowledgement does not produce false timeout", async () => {
+  let resolveAck;
+  const app = await makeHarness({
+    sendChat: async () => await new Promise((resolve) => { resolveAck = resolve; })
+  });
+  await app.openSocket();
+  await app.start();
+  await app.finish("Jarvis, öffne Spotify");
+  await app.socketEvent("run_state", "fast-failed-run", "error");
+  resolveAck({ run_id: "fast-failed-run" });
+  await app.settle();
+  assert.equal(app.hasTimer(45_000), false);
+  assert.match(app.visible(), /Run fehlgeschlagen|Vom Agent angenommen/);
+});
+
+test("MEDIUM: wrong early terminal ID cannot complete a different acknowledged Run", async () => {
+  let resolveAck;
+  const app = await makeHarness({
+    sendChat: async () => await new Promise((resolve) => { resolveAck = resolve; })
+  });
+  await app.openSocket();
+  await app.start();
+  await app.finish("Jarvis, öffne Spotify");
+  await app.socketEvent("run_state", "other-run", "done");
+  resolveAck({ run_id: "my-run" });
+  await app.settle();
+  assert.equal(app.hasTimer(45_000), true);
+  await app.socketEvent("run_state", "my-run", "done");
+  assert.equal(app.hasTimer(45_000), false);
+});
+
+test("MEDIUM: explicit decision releases an uncertain Run, never implicitly", async () => {
+  const app = await makeHarness();
+  await app.openSocket();
+  await app.start();
+  await app.finish("Jarvis, öffne Spotify");
+  await app.timer(80);
+  await app.finish("Jarvis, öffne Notizen");
+  await app.closeSocket();
+  const unblock = app.find((node) => node.type === "button" &&
+    node.props?.children === "Run prüfen und bewusst fortsetzen");
+  assert.ok(unblock);
+  unblock.props.onClick();
+  await app.settle();
+  assert.equal(app.sends.length, 1);
+  app.setConfirmedRetry(true);
+  unblock.props.onClick();
+  await app.settle();
+  assert.equal(app.sends.length, 2);
+});
+
+test("LOW: identical capture timestamps and fixed random values preserve distinct voice messages", async () => {
+  const app = await makeHarness();
+  await app.start();
+  await app.finish("Jarvis, erste Aufgabe");
+  const sameTime = app.clock();
+  await app.socketEvent("run_state", "run-1", "done");
+  await app.timer(80);
+  app.setClock(sameTime - 60);
+  await app.finish("Jarvis, zweite Aufgabe");
+  assert.deepEqual(app.sends.map((entry) => entry.message), ["erste Aufgabe", "zweite Aufgabe"]);
+  assert.match(app.visible(), /erste Aufgabe/);
+  assert.match(app.visible(), /zweite Aufgabe/);
+});
+
+test("TTS echo: fully captured command before new assistant playback stays valid", async () => {
+  let finishStt;
+  const app = await makeHarness({
+    transcribe: async () => await new Promise((resolve) => { finishStt = resolve; })
+  });
+  await app.openSocket();
+  await app.start();
+  app.recorders[0].payload = "Jarvis, öffne Spotify";
+  app.frame(60, 160);
+  await app.stop();
+  await app.socketEvent("message", "other-run", null, "Jarvis, öffne Spotify");
+  finishStt({ text: "Jarvis, öffne Spotify", language: "de", latency_ms: 500 });
+  await app.settle();
+  assert.deepEqual(app.sends.map((entry) => entry.message), ["öffne Spotify"]);
+});
+
+test("TTS echo: assistant playback starting during an open capture flushes valid prior audio", async () => {
+  const app = await makeHarness();
+  await app.openSocket();
+  await app.start();
+  app.recorders[0].payload = "Jarvis, öffne Spotify";
+  app.frame(60, 160);
+  await app.socketEvent("message", "assistant-run", null, "Eine andere Antwort.");
+  assert.deepEqual(app.sends.map((entry) => entry.message), ["öffne Spotify"]);
+});
+
+test("TTS echo: overlapping assistant chunks do not overwrite the capture-time echo reference", async () => {
+  const pending = [], played = [];
+  const app = await makeHarness({
+    speak: (text) => {
+      played.push(text);
+      return new Promise((resolve) => pending.push(resolve));
+    }
+  });
+  await app.openSocket();
+  await app.start();
+  app.recorders[0].payload = "Jarvis, öffne Spotify";
+  app.frame(60, 160);
+  await app.socketEvent("message", "tts-1", null, "Jarvis, öffne Spotify");
+  await app.socketEvent("message", "tts-2", null, "Jarvis, öffne Spotify erneut");
+  assert.equal(played.length, 1);
+  assert.equal(app.sends.length, 1);
+  pending.shift()({ ok: true });
+  await app.settle();
+  await app.timer(18); // Existing TTS queue schedules its next chunk separately.
+  assert.equal(played.length, 2);
+  pending.shift()({ ok: true });
+  await app.settle();
+  assert.equal(app.sends.length, 1);
+});
+
+test("TTS echo: short assistant 'Jarvis' must not open the wakeword window", async () => {
+  const app = await makeHarness();
+  await app.openSocket();
+  await app.start();
+  await app.socketEvent("message", "tts-short", null, "Jarvis");
+  app.advance(500); // AFTER playback but still near the last assistant chunk.
+  await app.timer(430); // existing TTS suppression + recorder-restart delay
+  await app.finish("Jarvis");
+  await app.timer(80);
+  await app.finish("Öffne Spotify");
+  assert.deepEqual(app.sends, []);
 });

@@ -369,6 +369,7 @@ async def _run_stt_subprocess(
     *,
     timeout_seconds: float,
     phase: str,
+    cleanup_timeout_seconds: float = 10.0,
 ) -> subprocess.CompletedProcess[str]:
     """Own and reap STT child processes; never use an unbounded background thread."""
     try:
@@ -393,12 +394,25 @@ async def _run_stt_subprocess(
                     process.kill()
             except ProcessLookupError:
                 pass
+        # Pipe readers might still be wedged after the child is killed. Neither
+        # communicate() nor the fallback reaping wait may block without a deadline.
+        cleanup_incomplete = False
         try:
-            await asyncio.wait_for(process.communicate(), timeout=10)
+            await asyncio.wait_for(process.communicate(), timeout=cleanup_timeout_seconds)
         except (TimeoutError, RuntimeError):
-            await process.wait()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=min(cleanup_timeout_seconds, 2.0))
+            except TimeoutError:
+                cleanup_incomplete = True
         if isinstance(error, asyncio.CancelledError):
+            # A cancellation remains a cancellation even when a child could not be
+            # fully reaped within the bounded cleanup attempt.
             raise
+        if cleanup_incomplete:
+            raise AudioError(
+                f"{phase}: Zeitlimit von {int(timeout_seconds)} Sekunden überschritten; "
+                "Kindprozess konnte innerhalb des Cleanup-Limits nicht bestätigt beendet werden."
+            ) from error
         raise AudioError(f"{phase}: Zeitlimit von {int(timeout_seconds)} Sekunden überschritten.") from error
     return subprocess.CompletedProcess(
         args, process.returncode,

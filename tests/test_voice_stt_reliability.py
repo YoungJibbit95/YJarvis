@@ -179,3 +179,58 @@ def test_http_stt_failure_returns_503_and_removes_upload(tmp_path, monkeypatch):
             assert "Zeitlimit" in response.json()["detail"]
     asyncio.run(exercise())
     assert list(config.audio_tmp_dir.iterdir()) == []
+
+def test_blocked_child_cleanup_has_a_second_finite_deadline(monkeypatch):
+    class Unreapable:
+        pid = 987654321
+        returncode = None
+        killed = False
+        attempts = 0
+        waited = False
+
+        async def communicate(self):
+            self.attempts += 1
+            await asyncio.Event().wait()
+
+        async def wait(self):
+            self.waited = True
+            await asyncio.Event().wait()
+
+        def kill(self):
+            self.killed = True
+
+    process = Unreapable()
+
+    async def fake_spawn(*_args, **_kwargs):
+        return process
+
+    monkeypatch.setattr(audio.asyncio, "create_subprocess_exec", fake_spawn)
+    if audio.os.name != "nt":
+        monkeypatch.setattr(audio.os, "killpg", lambda *_: process.kill())
+
+    started = time.monotonic()
+    with pytest.raises(audio.AudioError, match="Cleanup-Limits"):
+        asyncio.run(audio._run_stt_subprocess(
+            ["fake-whisper"], timeout_seconds=0.025, cleanup_timeout_seconds=0.025,
+            phase="Whisper-Inferenz",
+        ))
+    assert time.monotonic() - started < 2
+    assert process.killed and process.waited and process.attempts >= 2
+
+
+def test_cancellation_of_real_stt_child_is_propagated_and_reaped():
+    async def exercise():
+        task = asyncio.create_task(audio._run_stt_subprocess(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            timeout_seconds=40,
+            cleanup_timeout_seconds=2,
+            phase="Whisper-Inferenz",
+        ))
+        await asyncio.sleep(0.2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=5)
+
+    started = time.monotonic()
+    asyncio.run(exercise())
+    assert time.monotonic() - started < 6

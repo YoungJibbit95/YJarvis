@@ -40,6 +40,26 @@ export class WakeCommandWindow {
   }
 }
 
+/** A fresh activation owns its wake permission and capture-order queue.
+ * A stopped activation may finalize recorded audio, but never arms a new activation.
+ */
+export class VoiceActivation {
+  readonly wake = new WakeCommandWindow();
+  readonly segments = new OrderedSegmentProcessor();
+  private nextSegment = 0;
+
+  constructor(readonly generation: number) {}
+
+  allocateSegment(): number {
+    return ++this.nextSegment;
+  }
+
+  cancel(): void {
+    this.wake.reset();
+    this.segments.cancel();
+  }
+}
+
 /** Each recorder receives an ID at creation. Completion can arrive in any order. */
 export class OrderedSegmentProcessor {
   private next = 1;
@@ -95,6 +115,38 @@ export type VoiceSubmission = {
   runId?: string;
   error?: string;
 };
+
+/** Preserve terminal events that race ahead of the HTTP run_id acknowledgement.
+ * Only bounded run IDs and terminal states are kept; no message or audio payload.
+ */
+export class TerminalRunHistory {
+  private states = new Map<string, "done" | "error">();
+
+  constructor(private readonly maxEntries = 64) {}
+
+  remember(id: string, state: "done" | "error"): void {
+    if (this.states.has(id)) this.states.delete(id);
+    this.states.set(id, state);
+    while (this.states.size > this.maxEntries) {
+      const first = this.states.keys().next().value;
+      if (first === undefined) break;
+      this.states.delete(first);
+    }
+  }
+
+  get(id: string): "done" | "error" | undefined {
+    return this.states.get(id);
+  }
+
+  get size(): number {
+    return this.states.size;
+  }
+}
+
+/** Monotonic IDs remain distinct with frozen clocks and predictable randomness. */
+export function nextLocalMessageId(previous: number, now: number): number {
+  return Math.max(previous + 1, Math.floor(now));
+}
 
 /** No automatic re-attempt after an ambiguous HTTP failure. */
 export class VoiceSubmissionQueue {
