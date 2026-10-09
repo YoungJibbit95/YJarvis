@@ -9,13 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..conversation_helpers import (
-    normalize_honorifics,
-    quick_clarification_reply,
-    quick_local_reply,
-    quick_system_status_reply,
-    quick_utility_reply,
-)
+from ..conversation_helpers import normalize_honorifics, quick_clarification_reply
 from ..learning_engine import DecideToolIntentFn, LearningEngine
 from ..safety import (
     confirmation_message,
@@ -111,30 +105,9 @@ class LegacyLearningStage:
 
 class LocalFastPaths:
     def route(self, user_message: str, settings: dict[str, Any]) -> LegacyRoute | None:
-        quick_reply = quick_local_reply(user_message)
-        if quick_reply:
-            return LegacyRoute(
-                user_message,
-                reply=normalize_honorifics(quick_reply),
-                detail="Schnellantwort lokal",
-            )
-
-        quick_status = quick_system_status_reply(user_message, settings)
-        if quick_status:
-            return LegacyRoute(
-                user_message,
-                reply=normalize_honorifics(quick_status),
-                detail="Statusantwort lokal",
-            )
-
-        quick_utility = quick_utility_reply(user_message)
-        if quick_utility:
-            return LegacyRoute(
-                user_message,
-                reply=normalize_honorifics(quick_utility),
-                detail="Utility-Antwort lokal",
-            )
-
+        # Only technically incomplete actions may take this deterministic
+        # clarification path. Ordinary speech, status, dates and readiness
+        # belong to the LLM with verified Toolkit facts.
         clarification = quick_clarification_reply(user_message)
         if clarification:
             return LegacyRoute(

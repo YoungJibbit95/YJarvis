@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator
 
 import httpx
@@ -39,27 +40,87 @@ def _extract_json_blob(text: str) -> str | None:
     end = candidate.rfind("}")
     if start == -1 or end == -1 or end <= start:
         return None
-    return candidate[start : end + 1]
+    re@dataclass(frozen=True)
+class ModelToolCall:
+    """Only a proposal; the exact read-only dispatcher must validate it."""
+
+    name: str
+    arguments: Any
+
+
+def _single_model_tool_call(chunks: list[Any]) -> ModelToolCall:
+    # Streaming Ollama may send the function in one chunk or in fragments.
+    # Never accept multiple tool calls or silently execute any partial output.
+    if not 1 <= len(chunks) <= 16:
+        raise LlmError("Read-only tool request must be exactly one call")
+
+    names: list[str] = []
+    arguments: list[Any] = []
+    indices: set[int] = set()
+    for item in chunks:
+        if not isinstance(item, dict):
+            raise LlmError("Invalid tool call")
+        function = item.get("function")
+        if not isinstance(function, dict):
+            raise LlmError("Invalid function call")
+        index = function.get("index", item.get("index", 0))
+        if type(index) is not int or index != 0:
+            raise LlmError("Multiple tool calls are not permitted")
+        indices.add(index)
+        name = function.get("name", "")
+        if not isinstance(name, str):
+            raise LlmError("Invalid function name")
+        if name:
+            names.append(name)
+        if "arguments" in function:
+            arguments.append(function["arguments"])
+    if not names or len(set(names)) != 1 or indices != {0}:
+        raise LlmError("Invalid or multiple tool names")
+    if not arguments:
+        raise LlmError("Missing tool arguments")
+    if len(arguments) == 1:
+        arg = arguments[0]
+    elif all(isinstance(part, str) for part in arguments):
+        arg = "".join(arguments)
+    elif all(part == arguments[0] for part in arguments):
+        arg = arguments[0]
+    else:
+        raise LlmError("Inconsistent tool arguments")
+
+    if isinstance(arg, str):
+        if len(arg) > 1024:
+            raise LlmError("Tool argument limit exceeded")
+        try:
+            arg = json.loads(arg, object_pairs_hook=_unique_json_fields)
+        except (ValueError, TypeError) as error:
+            raise LlmError("Invalid tool argument JSON") from error
+    if type(arg) is not dict:
+        raise LlmError("Tool arguments must be an object")
+    return ModelToolCall(names[0], arg)
 
 
 async def stream_chat(
     *,
     base_url: str,
     model: str,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     temperature: float = 0.2,
-) -> AsyncGenerator[str, None]:
+    tools: list[dict[str, Any]] | None = None,
+) -> AsyncGenerator[str | ModelToolCall, None]:
     url = f"{base_url.rstrip('/')}/api/chat"
-    payload = {
+    payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "stream": True,
         "options": {"temperature": temperature},
     }
+    if tools is not None:
+        payload["tools"] = tools
     if DEFAULT_OLLAMA_KEEP_ALIVE:
         payload["keep_alive"] = DEFAULT_OLLAMA_KEEP_ALIVE
 
     timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=30.0)
+    tool_chunks: list[Any] = []
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -77,8 +138,19 @@ async def stream_chat(
                         chunk = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-
+                    if not isinstance(chunk, dict):
+                        continue
                     message = chunk.get("message", {})
+                    if not isinstance(message, dict):
+                        continue
+
+                    calls = message.get("tool_calls")
+                    if calls is not None:
+                        if not isinstance(calls, list):
+                            raise LlmError("Invalid model tool calls")
+                        tool_chunks.extend(calls)
+                        if len(tool_chunks) > 16:
+                            raise LlmError("Excessive model tool calls")
                     content = message.get("content")
                     if content:
                         yield str(content)
@@ -89,6 +161,12 @@ async def stream_chat(
         raise
     except httpx.HTTPError as error:
         raise LlmError(_friendly_ollama_error(base_url, error)) from error
+
+    if tool_chunks:
+        yield _single_model_tool_call(tool_chunks)
+
+
+or(base_url, error)) from error
 
 
 async def complete_chat(

@@ -139,9 +139,6 @@ async def request_approval(rig, message="oeffne Safari"):
 
 
 @pytest.mark.parametrize("message, detail, text", [
-    ("hallo jarvis", "Schnellantwort lokal", "helfen"),
-    ("welches modell und whisper nutzt du?", "Statusantwort lokal", "qwen2.5:3b-instruct"),
-    ("wie viel Uhr ist es?", "Utility-Antwort lokal", "Uhr"),
     ("mach mir eine erinnerung", "Rueckfrage fuer praezisen Auftrag", "Erinnerung"),
     ("Bitte loesch das gesamte System jetzt", "Sicherheitsregel hat Anfrage blockiert", "Sicherheitsgruenden"),
     ("Bitte fuehre das mit sudo aus", "Sicherheitsbestaetigung erforderlich", "Bestaetige"),
@@ -322,11 +319,11 @@ def test_stream_error_keeps_emitted_tokens_but_does_not_flush_partial_buffer(rig
     asyncio.run(check())
 
 
-def test_empty_stream_uses_legacy_fallback(rig):
+def test_empty_stream_is_visible_model_error_not_successful_canned_reply(rig):
     rig.set_stream([])
     asyncio.run(rig.service.start_run("session", "run", "Erzaehle etwas ueber Sterne"))
-    assert event_order(rig) == ["received", "thinking", "message", "done"]
-    assert rig.events[-2]["content"] == "Ich konnte lokal keine Antwort erzeugen. Bitte pruefe Ollama und das Modell."
+    assert event_order(rig) == ["received", "thinking", "message", "error"]
+    assert "keine verwertbare Modellantwort" in rig.events[-2]["content"]
 
 
 def test_stream_compacts_after_eighth_persisted_message(rig):

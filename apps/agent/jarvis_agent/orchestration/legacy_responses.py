@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -10,9 +11,10 @@ from typing import Any
 from ..conversation_helpers import normalize_honorifics, tool_performance_score
 from ..db import Database
 from ..events import EventBus
-from ..llm import LlmError, complete_chat, stream_chat
+from ..llm import LlmError, ModelToolCall, complete_chat, stream_chat
 from ..memory import load_context_snippets, maybe_compact_session
 from ..profile import build_persona_system_prompt
+from ..runtime_facts import ReadOnlyToolkit, required_live_fact_tool
 
 
 def utc_now_iso() -> str:
@@ -30,6 +32,7 @@ class LegacyResponses:
         enable_llm_tool_summary: bool,
         token_flush_interval_seconds: float,
         token_flush_min_chars: int,
+        read_only_toolkit: ReadOnlyToolkit | None = None,
     ) -> None:
         self.db = db
         self.event_bus = event_bus
@@ -38,6 +41,7 @@ class LegacyResponses:
         self.enable_llm_tool_summary = enable_llm_tool_summary
         self.token_flush_interval_seconds = token_flush_interval_seconds
         self.token_flush_min_chars = token_flush_min_chars
+        self.read_only_toolkit = read_only_toolkit or ReadOnlyToolkit()
 
     async def emit_state(
         self,
@@ -100,7 +104,9 @@ class LegacyResponses:
 
         system_parts = [
             build_persona_system_prompt(profile),
-            "Wenn ein Tool noetig ist, nutze die Tool-Route statt Halluzination.",
+"Fuer aktuelle Systemzeit, Datum oder Systemfaehigkeiten fordere verifizierte Fakten ueber die angebotenen read-only Toolkit-Tools an. Erfinde solche Werte nicht.",
+            "Normale Gespraeche beantwortest du selbst. Kein Python-Template beantwortet sie. Aus der Existenz eines Tools folgt keine Ausfuehrungsfreigabe.",
+            "Wenn ein anderes OS-Tool noetig ist, nutze die bestehende Freigaberoute statt Halluzination.",
             "Antworte standardmaessig kurz und direkt (maximal 4 Saetze), ausser der Nutzer fordert Details.",
             "Wenn Fakten unsicher sind, benenne Unsicherheit klar. Erfinde keine Quellen, Namen oder Ereignisse.",
             "Nutze fuer kurze Anschlussfragen wie Warum, Erklaer es einfacher oder Mach es kuerzer die letzten Nachrichten dieser Session.",
@@ -208,6 +214,7 @@ class LegacyResponses:
     ) -> None:
         base_url = str(settings.get("ollama_base_url", "http://127.0.0.1:11434"))
         model = str(settings.get("model_name", "qwen2.5:3b-instruct"))
+        required_tool = required_live_fact_tool(user_message)
 
         try:
             messages = await self._build_prompt_messages(session_id, user_message, profile)
@@ -220,7 +227,6 @@ class LegacyResponses:
                 nonlocal pending_token_buffer, last_token_flush
                 if not pending_token_buffer:
                     return
-
                 if not force:
                     now = time.perf_counter()
                     if (
@@ -228,26 +234,94 @@ class LegacyResponses:
                         and (now - last_token_flush) < self.token_flush_interval_seconds
                     ):
                         return
-
                 await self.emit_token(session_id, run_id, pending_token_buffer)
                 pending_token_buffer = ""
                 last_token_flush = time.perf_counter()
 
-            async for token in stream_chat(base_url=base_url, model=model, messages=messages):
+            async def add_token(token: str) -> None:
+                nonlocal assistant_text, pending_token_buffer, first_visible_token_sent
                 if not token:
-                    continue
+                    return
                 assistant_text += token
                 pending_token_buffer += token
-                # Publish the first real token immediately. Later tokens retain
-                # existing size/time batching and downstream TTS chunk thresholds.
                 await flush_token_buffer(force=not first_visible_token_sent)
                 first_visible_token_sent = True
+
+            # Ordinary conversation: ONE Ollama streaming call, including
+            # greetings, thanks, readiness and follow-ups. The model may request
+            # only the two declared read-only Toolkit capabilities.
+            requested_tool: ModelToolCall | None = None
+            unverified_text = ""
+            async for part in stream_chat(
+                base_url=base_url,
+                model=model,
+                messages=messages,
+                tools=self.read_only_toolkit.descriptions(),
+            ):
+                if isinstance(part, ModelToolCall):
+                    if requested_tool is not None or assistant_text or unverified_text:
+                        raise LlmError("Vermischte oder mehrfache Modell-Tool-Ausgabe")
+                    requested_tool = part
+                elif isinstance(part, str):
+                    if requested_tool is not None:
+                        raise LlmError("Modell antwortete nach Tool-Aufruf ohne Pruefung")
+                    if required_tool:
+                        # Never expose a guessed current time/capability claim.
+                        unverified_text += part
+                        if len(unverified_text) > 4096:
+                            raise LlmError("Unverifizierte Modellantwort zu lang")
+                    else:
+                        await add_token(part)
+                else:
+                    raise LlmError("Unerwartetes Modell-Streaming-Format")
+
+            if requested_tool is not None:
+                if required_tool and requested_tool.name != required_tool:
+                    raise LlmError("Falsche Faktenquelle fuer die Anfrage")
+                if assistant_text or unverified_text:
+                    raise LlmError("Modell mischte Text mit einem Tool-Aufruf")
+                try:
+                    facts = self.read_only_toolkit.execute(
+                        requested_tool.name, requested_tool.arguments, settings=settings,
+                    )
+                except (TypeError, ValueError) as error:
+                    raise LlmError("Tool-Aufruf abgelehnt: ungepruefte Funktion oder Argumente") from error
+
+                # A single, non-recursive read-only call. Legacy OS actions are
+                # intentionally absent from this dispatcher and still need
+                # the existing separate human Approval.
+                messages.append({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "type": "function",
+                        "function": {
+                            "name": requested_tool.name,
+                            "arguments": requested_tool.arguments,
+                        },
+                    }],
+                })
+                messages.append({
+                    "role": "tool",
+                    "tool_name": requested_tool.name,
+                    "content": json.dumps(facts, ensure_ascii=False),
+                })
+                async for part in stream_chat(
+                    base_url=base_url, model=model, messages=messages,
+                ):
+                    if not isinstance(part, str):
+                        raise LlmError("Mehrfache Tool-Aktionen sind nicht erlaubt")
+                    await add_token(part)
+            elif required_tool:
+                # A local model without reliable tool calling does not get to
+                # invent a current clock value or claim OS capabilities.
+                raise LlmError("Aktuelle Fakten nicht verifiziert: kein Toolkit-Aufruf vom Modell")
 
             await flush_token_buffer(force=True)
 
             assistant_text = normalize_honorifics(assistant_text)
             if not assistant_text:
-                assistant_text = "Ich konnte lokal keine Antwort erzeugen. Bitte pruefe Ollama und das Modell."
+                raise LlmError("Ollama hat keine verwertbare Modellantwort geliefert")
 
             await self.finish(
                 session_id, run_id, assistant_text,

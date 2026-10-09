@@ -1,0 +1,197 @@
+"""Exactly two read-only model tools backed by live runtime facts.
+
+No legacy action is executable here. Known V2 specs are not provider wiring.
+"""
+from __future__ import annotations
+
+import shutil
+import sys
+from datetime import datetime
+from typing import Any, Callable
+import re
+
+from .tools import ToolRegistry
+
+LOCAL_TIME_TOOL = "system.local_datetime"
+DISCOVERY_TOOL = "toolkit.capability_snapshot"
+
+TOOL_DESCRIPTIONS: tuple[tuple[str, str], ...] = (
+    (LOCAL_TIME_TOOL,
+     "Get the current LOCAL system date/time and UTC offset, not a generated or cached time. "
+     "Use for current time, today's date and weekday questions."),
+    (DISCOVERY_TOOL,
+     "Inspect tools actually registered with this YJarvis process, their operating-system "
+     "availability, required inputs, risk and approval rules. "
+     "Use before claiming that Jarvis can perform a computer action."),
+)
+
+
+def required_live_fact_tool(message: str) -> str | None:
+    """Truth guard, not a canned-answer router: LLM must actually call the tool."""
+    stripped = re.sub(r"(?i)^\s*jarvis[\s,:;-]*", "", message.strip()).strip()
+    lowered = stripped.lower()
+    if re.search(
+        r"\b(?:wie (?:spät|spaet) (?:ist es|haben wir es)|"
+        r"wie (?:viel|viele) uhr|welches datum|welcher tag ist heute|"
+        r"uhrzeit|aktuelles datum|heutiges datum)\b", lowered,
+    ):
+        return LOCAL_TIME_TOOL
+    if re.search(
+        r"\b(?:was kannst du|systemfunktionen|welche funktionen|"
+        r"welche fähigkeiten|welche faehigkeiten|welche tools)\b", lowered,
+    ):
+        return DISCOVERY_TOOL
+    return None
+
+
+class ReadOnlyToolkit:
+    """An explicitly closed, side-effect-free dispatcher, never ToolRegistry.execute."""
+
+    def __init__(
+        self,
+        tools: ToolRegistry | None = None,
+        *,
+        clock: Callable[[], datetime] | None = None,
+        platform_name: str | None = None,
+        command_exists: Callable[[str], str | None] = shutil.which,
+    ) -> None:
+        self._tools = tools
+        self._clock = clock if clock is not None else lambda: datetime.now().astimezone()
+        self._platform = platform_name if platform_name is not None else sys.platform
+        self._command_exists = command_exists
+
+    def descriptions(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": {
+                        "type": "object", "properties": {},
+                        "required": [], "additionalProperties": False,
+                    },
+                },
+            }
+            for name, description in TOOL_DESCRIPTIONS
+        ]
+
+    def execute(self, name: str, arguments: Any, *, settings: dict[str, Any]) -> dict[str, Any]:
+        # Explicit exception to legacy Approval only for these two *exact*
+        # side-effect-free operations, with no accepted arguments.
+        if type(arguments) is not dict or arguments:
+            raise ValueError("Nur leere Argumente fuer read-only Toolkit-Fakten erlaubt")
+        if name == LOCAL_TIME_TOOL:
+            return self.local_datetime()
+        if name == DISCOVERY_TOOL:
+            return self.capability_snapshot(settings=settings)
+        raise ValueError("Nicht registrierte read-only Funktion")
+
+    def local_datetime(self) -> dict[str, Any]:
+        now = self._clock()
+        if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("Systemzeit besitzt keine verifizierbare Zeitzone")
+        offset = now.strftime("%z")
+        if len(offset) != 5:
+            raise ValueError("UTC-Offset ungueltig")
+        return {
+            "capability": LOCAL_TIME_TOOL,
+            "local_iso": now.isoformat(timespec="seconds"),
+            "local_date": now.date().isoformat(),
+            "weekday_iso": now.isoweekday(),
+            "timezone_identifier": getattr(now.tzinfo, "key", None),
+            "timezone_label": now.tzname(),
+            "utc_offset": f"{offset[:3]}:{offset[3:]}",
+            "source": "datetime.now().astimezone() system clock",
+            "notes": "OS-local clock; timezone label may not be an IANA identifier",
+        }
+
+    def _legacy_runtime_status(self, tool_name: str, settings: dict[str, Any]) -> dict[str, Any]:
+        if self._tools is None:
+            return {"platform_supported": False, "available": False, "availability_note": "No active legacy registry"}
+        # The registry owns its instances. No other global capability list
+        # is used as proof of executable tools.
+        registered = self._tools._tools.get(tool_name)
+        if registered is None:
+            return {"platform_supported": False, "available": False, "availability_note": "Not registered"}
+        module = type(registered).__module__
+        if module.endswith(".applescript_tools"):
+            supported = self._platform == "darwin"
+            return {
+                "platform_supported": supported,
+                "available": supported and bool(self._command_exists("osascript")),
+                "availability_note": "macOS AppleScript; target app and OS permissions not probed",
+            }
+        if module.endswith(".system_tools"):
+            supported = self._platform == "darwin"
+            return {
+                "platform_supported": supported,
+                "available": supported and bool(self._command_exists("open")),
+                "availability_note": "macOS open/Apple utilities; destination not verified",
+            }
+        if module.endswith(".file_tools"):
+            configured = settings.get("allowed_paths", [])
+            enabled = isinstance(configured, list) and any(
+                isinstance(p, str) and p.strip() for p in configured
+            )
+            return {
+                "platform_supported": True,
+                "available": enabled,
+                "availability_note": (
+                    "Python file backend; specific path still needs allowlist/safety/approval"
+                    if enabled else "No allowed paths configured; cannot access files"
+                ),
+            }
+        return {
+            "platform_supported": False,
+            "available": False,
+            "availability_note": "Unknown provider implementation; fail closed",
+        }
+
+    def capability_snapshot(self, *, settings: dict[str, Any]) -> dict[str, Any]:
+        from .domain.capability_catalog import CAPABILITY_CATALOG, LEGACY_TOOL_TO_CAPABILITY
+
+        legacy: list[dict[str, Any]] = []
+        if self._tools is not None:
+            for spec in self._tools.list_specs():
+                name = spec["tool_name"]
+                availability = self._legacy_runtime_status(name, settings)
+                legacy.append({
+                    "name": name,
+                    "semantic_name": LEGACY_TOOL_TO_CAPABILITY.get(name),
+                    "registered": True,
+                    **availability,
+                    "risk": spec["risk_level"],
+                    "requires_approval": spec["requires_approval"],
+                    "approved": False,
+                    "input_fields": sorted(spec["input_schema"]),
+                })
+
+        # No CapabilityProviderRegistry instance is wired to this production
+        # TurnEngine. Specs in CAPABILITY_CATALOG are known, NOT executable.
+        known_v2 = sorted(CAPABILITY_CATALOG)
+        runtime = [
+            {
+                "name": name,
+                "registered": True,
+                "available": True,
+                "requires_approval": False,
+                "risk": "read_only",
+                "input_fields": [],
+                "source": "ReadOnlyToolkit.execute (exact-name dispatch)",
+            }
+            for name, _ in TOOL_DESCRIPTIONS
+        ]
+        return {
+            "platform": self._platform,
+            "read_only_runtime": runtime,
+            "legacy_registered": legacy,
+            "v2_catalog": {
+                "known_capabilities": known_v2,
+                "provider_wired_to_current_agent": False,
+                "available_for_execution": [],
+                "note": "Catalog definitions do not imply provider registration or runtime wiring",
+            },
+            "discovery_does_not_grant_approval": True,
+            "note": "Availability is platform/backend readiness, not target app or permission verification",
+        }
