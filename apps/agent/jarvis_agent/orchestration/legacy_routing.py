@@ -94,8 +94,10 @@ class LegacyRouting:
             if learned_intent:
                 return await self.learning.apply_adaptive_routing(learned_intent)
 
-        # Preserve learned triggers first, but never infer actions from generic
-        # mentions of files/reminders in an ordinary conversation.
+        # Learned triggers remain first. This guard excludes conversational
+        # questions, but also recognizes the complete existing deterministic
+        # heuristic inventory (not only a shorter verb list), so no valid
+        # legacy ToolIntent gets dropped before the registered-tool match.
         if not looks_like_tool_request(user_message):
             return None
 

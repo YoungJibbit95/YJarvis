@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .db import normalize_learned_trigger
+from .tool_intent import infer_heuristic_tool_call
 
 # Recognize action verbs with word boundaries, not arbitrary substrings.
 TOOL_ACTION_RE = re.compile(
@@ -80,7 +81,13 @@ def looks_like_tool_request(user_message: str) -> bool:
         return True
     if re.search(r"\b(?:musik|music)\s+(?:pausieren|pause|weiter|stoppen)\b", message):
         return True
-    return TOOL_ACTION_RE.search(message) is not None
+    if TOOL_ACTION_RE.search(message):
+        return True
+    # The established deterministic parser also supports valid noun-first and
+    # alternative-verb forms (e.g. "Offene Erinnerungen", "Musik anhalten",
+    # "Verfasse eine Mail"). A second, shorter verb list must not silently
+    # shadow those legacy intents. Pure recognition does not execute a tool.
+    return infer_heuristic_tool_call(message) is not None
 
 
 def normalize_honorifics(text: str) -> str:

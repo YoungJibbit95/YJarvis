@@ -8,12 +8,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from jarvis_agent.conversation_helpers import looks_like_tool_request
 from jarvis_agent.db import Database
 from jarvis_agent.learning_engine import LearningEngine
 from jarvis_agent.orchestration import legacy_planner as planner_module
 from jarvis_agent.orchestration import legacy_routing as routing_module
 from jarvis_agent.orchestration import routing_stages as stages_module
-from jarvis_agent.tool_intent import ToolCallIntent
+from jarvis_agent.tool_intent import ToolCallIntent, infer_heuristic_tool_call
 from jarvis_agent.tools import ToolRegistry
 
 
@@ -153,6 +154,103 @@ def test_reminder_with_content_asks_only_for_missing_time(router):
     assert result.reply == "Wann soll ich dich daran erinnern?"
     assert result.detail == "Rueckfrage fuer praezisen Auftrag"
     router.planner.assert_not_awaited()
+
+# One concrete utterance for every registered legacy ToolRegistry intent, plus
+# multiple accepted forms of music control. This catches divergence between
+# looks_like_tool_request() and infer_heuristic_tool_call() before it reaches CI.
+LEGACY_INTENT_CASES = [
+    ("Bitte oeffne https://example.com jetzt", "open_url", {"url": "https://example.com"}),
+    ("öffne Safari bitte", "open_app", {"app_name": "Safari"}),
+    ("oeffne raycast mit suche projekt status", "raycast_open", {}),
+    ("raycast befehl raycast/file-search/search-files mit text ~/Desktop",
+     "raycast_run_command", {"owner": "raycast", "extension": "file-search", "command": "search-files"}),
+    ("Zwischenablage lesen", "clipboard_read", {}),
+    ("kopiere Hallo Sir in die Zwischenablage", "clipboard_write", {"text": "Hallo Sir"}),
+    ("erinner mich morgen 8 uhr an den muell", "reminder_create", {}),
+    ("Offene Erinnerungen", "reminder_list", {}),
+    ("plane morgen 09:30 uhr einen termin fuer 45 minuten mit titel Daily Standup",
+     "calendar_create_event", {}),
+    ("Kommende Termine", "calendar_list_events", {}),
+    ("Erzeuge eine Notiz", "notes_create", {}),
+    ("suche in notizen nach projekt phoenix 5", "notes_search", {}),
+    ("Verfasse eine Mail", "mail_create_draft", {}),
+    ("sende nachricht an +49123456789: Bitte Licht ausmachen", "messages_send", {}),
+    ("suche kontakt Max Mustermann", "contacts_search", {}),
+    ("Musik anhalten", "music_control", {"action": "pause"}),
+    ("Musik fortsetzen", "music_control", {"action": "play"}),
+    ("Stoppe die Musik", "music_control", {"action": "pause"}),
+    ("Musik nächster Titel", "music_control", {"action": "next"}),
+    ("Musik zurück", "music_control", {"action": "previous"}),
+    ("datei lesen /tmp/test.txt", "file_read", {"path": "/tmp/test.txt"}),
+    ("datei schreiben /tmp/test.txt: Hallo", "file_write", {"path": "/tmp/test.txt"}),
+]
+
+
+def test_review_matrix_covers_all_registered_legacy_tool_intents(router):
+    expected = {tool_name for _, tool_name, _ in LEGACY_INTENT_CASES}
+    registered = {spec["tool_name"] for spec in router.routing.heuristic.tools.list_specs()}
+    assert expected == registered
+
+
+@pytest.mark.parametrize("utterance,tool_name,fields", LEGACY_INTENT_CASES)
+def test_every_supported_legacy_heuristic_passes_conversation_gate(router, utterance, tool_name, fields):
+    existing = infer_heuristic_tool_call(utterance)
+    assert existing is not None, f"Not actually supported by existing heuristic: {utterance}"
+    assert existing.tool_name == tool_name
+    assert looks_like_tool_request(utterance), f"Gate dropped {tool_name}: {utterance}"
+
+    result = route(router, utterance)
+    assert result.reply is None
+    assert result.intent is not None
+    assert result.intent.tool_name == tool_name
+    for key, value in fields.items():
+        assert existing.tool_input[key] == value
+        assert result.intent.tool_input[key] == value
+    router.planner.assert_not_awaited()
+
+
+def test_newly_reachable_music_command_still_respects_learned_override(router):
+    asyncio.run(router.db.upsert_learned_command(
+        trigger="Musik anhalten", tool_name="open_app", tool_input={"app_name": "Notes"},
+    ))
+    result = route(router, "Musik anhalten")
+    assert result.intent == ToolCallIntent(
+        "open_app", {"app_name": "Notes"},
+        "Gelernter Befehl: musik anhalten", "musik anhalten",
+    )
+    router.planner.assert_not_awaited()
+
+
+def test_newly_reachable_command_still_obeys_safety_before_heuristics(router):
+    blocked = route(router, "Musik anhalten", {
+        "safety": {"blocked_request_patterns": ["Musik anhalten"]}
+    })
+    assert blocked.detail == "Sicherheitsregel hat Anfrage blockiert"
+    assert blocked.intent is None
+    confirmed = route(router, "Musik anhalten", {
+        "safety": {"confirmation_required_patterns": ["Musik anhalten"]}
+    })
+    assert confirmed.detail == "Sicherheitsbestaetigung erforderlich"
+    assert confirmed.intent is None
+    router.planner.assert_not_awaited()
+
+
+@pytest.mark.parametrize("utterance", [
+    "Ich möchte über meine Erinnerungen sprechen.",
+    "Erkläre mir, wie Notizen funktionieren.",
+    "Warum sollte ich die Musik anhalten?",
+    "Welche Möglichkeiten bietet Raycast?",
+    "Mach es kürzer.",
+    "Erklär mir das einfacher.",
+    "Ich möchte über Dateien reden.",
+])
+def test_review_discussion_phrases_are_never_interpreted_as_actions(router, utterance):
+    assert not looks_like_tool_request(utterance)
+    result = route(router, utterance)
+    assert result.intent is None
+    assert result.reply is None
+    router.planner.assert_not_awaited()
+
 
 @pytest.mark.parametrize("message, tool_name, tool_input", [
     ("öffne Safari bitte", "open_app", {"app_name": "Safari"}),

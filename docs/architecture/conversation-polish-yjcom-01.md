@@ -26,6 +26,55 @@ Targeted regressions cover `Jarvis, öffne Safari`, `Lies diese Datei`, `datei l
 
 Controlled fixtures demonstrate that all three reads **start before any finishes**, and that a token event exists while a mocked LLM stream pauses before its second token. These are structural latency improvements, not evidence of a specific number of milliseconds on a real user's device. Actual local Ollama, Whisper and microphone response times: **NOT MEASURED**. No extra LLM request or changed Ollama parameters.
 
+## External review corrections — HIGH-01 and clarification boundary
+
+### HIGH-01: Do not hide a registered legacy intent behind a shorter verb list
+
+The communication-polish `looks_like_tool_request()` was introduced as a
+conservative gate before `LegacyHeuristicFastPath.match()`. Its hand-maintained
+action verbs did not cover the existing parser's complete inventory, so previously
+supported commands such as `Musik anhalten`, `Offene Erinnerungen`,
+`Kommende Termine`, `Verfasse eine Mail`, `Erzeuge eine Notiz`,
+`Zwischenablage lesen`, and `raycast befehl raycast/file-search/search-files`
+could be excluded before normal ToolRegistry and Approval processing.
+
+The gate now performs its existing conversation/meta-question exclusion **first**,
+then keeps its existing action-verb recognition, and finally consults the
+**existing pure `infer_heuristic_tool_call()`** for any other supported legacy
+phrasing. This is not a second parser or a planner/ToolRegistry change. A recognized
+intent still travels through learned-command priority, the registered-tool check,
+and explicit user approval before any tool execution. Unknown explicit `/tool`
+names still cannot fall through to a different model-suggested action.
+
+The positive regression matrix covers **every registered legacy tool intent**:
+`open_url`, `open_app`, `raycast_open`, `raycast_run_command`,
+`clipboard_read`, `clipboard_write`, `reminder_create`,
+`reminder_list`, `calendar_create_event`, `calendar_list_events`,
+`notes_create`, `notes_search`, `mail_create_draft`, `messages_send`,
+`contacts_search`, `music_control`, `file_read`, and `file_write`.
+Multiple music phrasings test pause, resume, next and previous. The test compares
+the full ToolRegistry inventory against the documented examples so future
+registered legacy intents cannot go silently untested.
+
+The negative cases `Ich möchte über meine Erinnerungen sprechen`,
+`Erkläre mir, wie Notizen funktionieren`,
+`Warum sollte ich die Musik anhalten`,
+`Welche Möglichkeiten bietet Raycast`, `Mach es kürzer`,
+`Erklär mir das einfacher`, and `Ich möchte über Dateien reden` remain
+conversational, without an inferred tool, planner invocation, approval record,
+or actual execution. Full AgentService lifecycle tests assert that known
+positive commands produce `approval_required` rather than execution.
+
+### MEDIUM: Clarification is a one-turn wording improvement, not stored intent
+
+For `Erinnere mich an den Einkauf`, Jarvis asks `Wann soll ich dich daran erinnern?`
+but **does not persist a pending reminder ToolIntent**. A later standalone
+`morgen` is not automatically combined with the original instruction and
+**does not create the reminder**. The user must currently provide a full
+unambiguous request (e.g. `Erinnere mich morgen an den Einkauf`) for the
+existing tool/approval path to process it. This is a pre-existing limitation.
+A multi-turn clarification state machine is explicitly **not** part of YJCOM-01.
+
 ## Known limits and rollback
 
 - Short follow-up understanding still depends on the local LLM's available session history and does not reconstruct unavailable or ambiguous references.

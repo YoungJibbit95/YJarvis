@@ -449,6 +449,59 @@ def test_first_llm_token_published_before_slow_second_token(rig):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("utterance,tool_name,expected_fields", [
+    ("Musik anhalten", "music_control", {"action": "pause"}),
+    ("Musik fortsetzen", "music_control", {"action": "play"}),
+    ("Stoppe die Musik", "music_control", {"action": "pause"}),
+    ("Offene Erinnerungen", "reminder_list", {}),
+    ("Kommende Termine", "calendar_list_events", {}),
+    ("Verfasse eine Mail", "mail_create_draft", {}),
+    ("Erzeuge eine Notiz", "notes_create", {}),
+    ("Zwischenablage lesen", "clipboard_read", {}),
+    ("raycast befehl raycast/file-search/search-files mit text ~/Desktop",
+     "raycast_run_command", {"owner": "raycast", "extension": "file-search", "command": "search-files"}),
+])
+def test_review_legacy_command_must_wait_for_explicit_tool_approval(
+    rig, utterance, tool_name, expected_fields,
+):
+    async def check():
+        await rig.service.start_run("session", "run", utterance)
+        assert event_order(rig) == ["received", "thinking", "approval_required"]
+        approvals = await rig.db.list_pending_approvals()
+        assert len(approvals) == 1
+        assert approvals[0]["tool_name"] == tool_name
+        for key, value in expected_fields.items():
+            assert approvals[0]["tool_input"][key] == value
+        assert rig.events[-1]["data"]["approval"] == approvals[0]
+        rig.tools.execute.assert_not_awaited()
+        rig.planner.assert_not_awaited()
+        rig.stream.assert_not_called()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("utterance", [
+    "Ich möchte über meine Erinnerungen sprechen.",
+    "Erkläre mir, wie Notizen funktionieren.",
+    "Warum sollte ich die Musik anhalten?",
+    "Welche Möglichkeiten bietet Raycast?",
+    "Mach es kürzer.",
+    "Erklär mir das einfacher.",
+    "Ich möchte über Dateien reden.",
+])
+def test_review_conversation_never_creates_approval_or_executes(rig, utterance):
+    rig.set_stream(["Eine normale Antwort."])
+
+    async def check():
+        await rig.service.start_run("session", "run", utterance)
+        assert event_order(rig) == ["received", "thinking", "token", "message", "done"]
+        assert await rig.db.list_pending_approvals() == []
+        rig.tools.execute.assert_not_awaited()
+        rig.planner.assert_not_awaited()
+
+    asyncio.run(check())
+
+
 def test_learned_command_wins_over_heuristic_and_planner(rig):
     rig.service = rig.enable("JARVIS_ENABLE_TOOL_PLANNER")
 
