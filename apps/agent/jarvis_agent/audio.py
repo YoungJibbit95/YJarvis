@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,9 @@ DEFAULT_WHISPER_BEST_OF = int(os.environ.get("JARVIS_WHISPER_BEST_OF", "4"))
 DEFAULT_WHISPER_NO_SPEECH_THOLD = float(os.environ.get("JARVIS_WHISPER_NO_SPEECH_THOLD", "0.70"))
 DEFAULT_WHISPER_ENTROPY_THOLD = float(os.environ.get("JARVIS_WHISPER_ENTROPY_THOLD", "2.10"))
 DEFAULT_WHISPER_LOGPROB_THOLD = float(os.environ.get("JARVIS_WHISPER_LOGPROB_THOLD", "-0.60"))
+# Real CPU whisper.cpp inference can take minutes. Keep generous finite ceilings.
+STT_FFMPEG_TIMEOUT_SECONDS = 120.0
+STT_WHISPER_TIMEOUT_SECONDS = 480.0
 DEFAULT_PIPER_LENGTH_SCALE = float(os.environ.get("JARVIS_PIPER_LENGTH_SCALE", "0.80"))
 DEFAULT_PIPER_NOISE_SCALE = float(os.environ.get("JARVIS_PIPER_NOISE_SCALE", "0.80"))
 DEFAULT_PIPER_NOISE_W_SCALE = float(os.environ.get("JARVIS_PIPER_NOISE_W_SCALE", "0.88"))
@@ -360,6 +364,63 @@ async def _run_subprocess(args: list[str], *, input_text: str | None = None) -> 
     return await asyncio.to_thread(_run)
 
 
+async def _run_stt_subprocess(
+    args: list[str],
+    *,
+    timeout_seconds: float,
+    phase: str,
+    cleanup_timeout_seconds: float = 10.0,
+) -> subprocess.CompletedProcess[str]:
+    """Own and reap STT child processes; never use an unbounded background thread."""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=os.name != "nt",
+        )
+    except OSError as error:
+        raise AudioError(f"{phase}: Programm konnte nicht gestartet werden: {error}") from error
+
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+    except (TimeoutError, asyncio.CancelledError) as error:
+        if process.returncode is None:
+            try:
+                if os.name != "nt":
+                    # Whisper/ffmpeg are their own process group. End children too.
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
+            except ProcessLookupError:
+                pass
+        # Pipe readers might still be wedged after the child is killed. Neither
+        # communicate() nor the fallback reaping wait may block without a deadline.
+        cleanup_incomplete = False
+        try:
+            await asyncio.wait_for(process.communicate(), timeout=cleanup_timeout_seconds)
+        except (TimeoutError, RuntimeError):
+            try:
+                await asyncio.wait_for(process.wait(), timeout=min(cleanup_timeout_seconds, 2.0))
+            except TimeoutError:
+                cleanup_incomplete = True
+        if isinstance(error, asyncio.CancelledError):
+            # A cancellation remains a cancellation even when a child could not be
+            # fully reaped within the bounded cleanup attempt.
+            raise
+        if cleanup_incomplete:
+            raise AudioError(
+                f"{phase}: Zeitlimit von {int(timeout_seconds)} Sekunden überschritten; "
+                "Kindprozess konnte innerhalb des Cleanup-Limits nicht bestätigt beendet werden."
+            ) from error
+        raise AudioError(f"{phase}: Zeitlimit von {int(timeout_seconds)} Sekunden überschritten.") from error
+    return subprocess.CompletedProcess(
+        args, process.returncode,
+        stdout.decode("utf-8", errors="replace"),
+        stderr.decode("utf-8", errors="replace"),
+    )
+
+
 def _parse_say_voices(raw_output: str) -> list[str]:
     voices: list[str] = []
     seen: set[str] = set()
@@ -446,11 +507,12 @@ async def transcribe_with_whisper_cpp(
         else:
             ffmpeg = _find_ffmpeg_binary()
             if not ffmpeg:
-                raise AudioError("ffmpeg nicht gefunden. Bitte `brew install ffmpeg` ausfuehren.")
+                raise AudioError("ffmpeg fehlt. Bitte über den System-Paketmanager oder Guided Setup installieren (Windows/macOS).")
 
-            conversion = await _run_subprocess(
+            conversion = await _run_stt_subprocess(
                 [
                     ffmpeg,
+                    "-nostdin",
                     "-y",
                     "-i",
                     str(source_path),
@@ -459,7 +521,9 @@ async def transcribe_with_whisper_cpp(
                     "-ac",
                     "1",
                     str(converted_path),
-                ]
+                ],
+                timeout_seconds=STT_FFMPEG_TIMEOUT_SECONDS,
+                phase="ffmpeg-Konvertierung",
             )
 
             if conversion.returncode != 0:
@@ -495,7 +559,11 @@ async def transcribe_with_whisper_cpp(
             str(out_prefix),
         ]
 
-        result = await _run_subprocess(command)
+        result = await _run_stt_subprocess(
+            command,
+            timeout_seconds=STT_WHISPER_TIMEOUT_SECONDS,
+            phase="Whisper-Inferenz",
+        )
         if result.returncode != 0:
             raise AudioError(_compact_error_message(result.stderr or "Whisper Transkription fehlgeschlagen."))
 

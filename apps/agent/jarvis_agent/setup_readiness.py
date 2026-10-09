@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import BaseModel
 
-from .native_tools import find_whisper_binary
+from .native_tools import find_system_tool, find_whisper_binary
 
 
 class ComponentStatus(BaseModel):
@@ -104,6 +104,8 @@ async def inspect_setup(settings: dict[str, Any], default_whisper_model: Path) -
     stt = inspect_model_file(str(settings.get("whisper_model_path", "") or default_whisper_model))
     if stt.status == "available" and not find_whisper_binary(str(settings.get("whisper_binary", "auto"))):
         stt = ComponentStatus(status="missing", reason="whisper_cli_missing")
+    if stt.status == "available" and not find_system_tool("ffmpeg"):
+        stt = ComponentStatus(status="missing", reason="ffmpeg_missing")
     tts = ComponentStatus(status="unknown", reason="voice_unverified")
     if str(settings.get("tts_engine", "piper")).strip().lower() == "piper":
         asset = inspect_model_file(str(settings.get("tts_model_path", "")).strip())

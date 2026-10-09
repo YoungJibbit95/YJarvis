@@ -1,4 +1,5 @@
 import type { Approval, JarvisSettings, SmartHomeEntity } from "@jarvis/shared-types";
+import { recordingFileName } from "./voice/voiceReliability";
 import { parseSetupStatus, type SetupStatus } from "./setup/types";
 import { parseModelCatalog, type ModelCatalogEntry } from "./setup/modelCatalog";
 import { parseHardwareProfile, type HardwareProfile } from "./setup/hardwareProfile";
@@ -144,19 +145,44 @@ export async function fetchMessages(sessionId: string): Promise<ChatMessage[]> {
   return response.json();
 }
 
+export class ChatSubmissionError extends Error {
+  constructor(message: string, readonly outcome: "rejected" | "unknown") {
+    super(message);
+    this.name = "ChatSubmissionError";
+  }
+}
+
 export async function sendChat(sessionId: string, message: string): Promise<{ run_id: string }> {
-  const response = await fetch(`${API_BASE}/v1/chat`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ session_id: sessionId, message })
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/v1/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, message }),
+      // A stalled ACK is uncertain, not permission to issue another agent run.
+      signal: AbortSignal.timeout(60_000)
+    });
+  } catch (error) {
+    // The backend may have committed a run before an HTTP acknowledgement was lost.
+    throw new ChatSubmissionError("Verbindung abgebrochen: Annahme durch Agent unklar. " +
+      (error instanceof Error ? error.message : String(error)), "unknown");
+  }
   if (!response.ok) {
     const details = await readErrorDetails(response, `HTTP ${response.status}`);
-    throw new Error(`Chat konnte nicht gesendet werden: ${details}`);
+    // 5xx/408/429 might follow a committed run when a gateway drops the ACK.
+    const outcome = response.status >= 500 || [408, 429].includes(response.status) ? "unknown" : "rejected";
+    throw new ChatSubmissionError(`Chat ${outcome === "unknown" ? "nicht bestätigt" : "wurde abgelehnt"}: ${details}`, outcome);
   }
-  return response.json();
+  try {
+    const result: unknown = await response.json();
+    if (!result || typeof result !== "object" || typeof (result as { run_id?: unknown }).run_id !== "string") {
+      throw new Error("Ungültige Chat-Antwort");
+    }
+    return result as { run_id: string };
+  } catch (error) {
+    throw new ChatSubmissionError("Agent-Antwort nicht lesbar: Annahme möglicherweise erfolgt. " +
+      (error instanceof Error ? error.message : String(error)), "unknown");
+  }
 }
 
 export async function fetchApprovals(): Promise<Approval[]> {
@@ -207,11 +233,12 @@ export async function saveSettings(payload: Partial<JarvisSettings>): Promise<Ja
 
 export async function transcribe(blob: Blob): Promise<{ text: string; language: string; latency_ms: number }> {
   const formData = new FormData();
-  formData.append("file", blob, "recording.webm");
+  formData.append("file", blob, recordingFileName(blob.type));
 
   const response = await fetch(`${API_BASE}/v1/audio/transcribe`, {
     method: "POST",
-    body: formData
+    body: formData,
+    signal: AbortSignal.timeout(660_000)
   });
 
   if (!response.ok) {

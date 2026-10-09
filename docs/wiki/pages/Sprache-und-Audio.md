@@ -9,19 +9,37 @@ Mikrofon / MediaRecorder → Segment nach Sprechpause → Upload
 → TTS-Synthese / Warteschlange → Wiedergabe
 ```
 
-Sprachmodus per Klick starten/stoppen. Der vorhandene Sprachfilter erwartet
-einen Präfix wie „Jarvis …“; nur „Jarvis“ wird ignoriert. Das ist keine
-eigenständige ständig laufende Wake-Word-Engine. `Text only` deaktiviert
-automatische gesprochene Antworten. Echo-Unterdrückung soll verhindern, dass
-Lautsprecherausgabe erneut als Anfrage aufgenommen wird.
+Sprachmodus per Klick starten/stoppen. Ein Befehl kann direkt „Jarvis, öffne …“
+enthalten oder als „Jarvis“ und Folgebefehl in zwei Aufnahmesegmenten erfolgen.
+Nach dem alleinstehenden Wakeword gilt ein 8-Sekunden-Fenster, gemessen an der
+Aufnahmezeit (nicht an der Whisper-Fertigstellung). Das ist keine neue akustische
+Wakeword-Engine. Echo-Unterdrückung bleibt aktiv. `Text only` deaktiviert
+automatisch gesprochene Antworten. Beim manuellen Stop werden gültige laufende
+Aufnahmen final transkribiert und bleiben als angenommenes oder ausstehendes
+Transkript sichtbar; ein expliziter Unmount-Abbruch verwirft weitere Verarbeitung.
 
 ## STT
 
 whisper.cpp benötigt ein kompatibles Binary und eine GGML-Modelldatei.
 `whisper_binary` und `whisper_model_path` in Settings prüfen; ohne konfigurierten
 Modellpfad greift der Default aus `WHISPER_MODEL`/Runtime. ffmpeg wird für
-Normalisierung benötigt. Das Vorhandensein eines Modells beweist keine
-funktionierende CLI oder gemessene Latenz.
+WebM- und MP4-Normalisierung benötigt; Setup meldet fehlendes ffmpeg,
+Whisper-Binary und Modelldateien getrennt. Die CLI hat großzügige endliche
+Prozesslimits: ffmpeg 120 Sekunden, Whisper 480 Sekunden. Bei Ablauf werden
+Kindprozesse beendet und temporäre Dateien bereinigt. Live-Zwischen-Whisper-
+Aufrufe sind im Reliability-Fix deaktiviert: Die finale Transkription hat Vorrang.
+Das Vorhandensein eines Modells beweist keine funktionierende CLI oder gemessene Latenz.
+
+## Voice-Queue und Chat
+
+Sprachbefehle erhalten lokale Äußerungs-IDs. Nur ein bestätigter `/v1/chat`-
+Submit erzeugt einen Chat-Eintrag. Bei Netzwerkfehlern bleibt ein Befehl sichtbar
+als *Ausgang unklar*; kein automatischer Retry löst womöglich dieselbe Aktion
+erneut aus. Bei einer expliziten Wiederholung nach unbekanntem HTTP-Ausgang
+wird das Risiko einer möglichen Doppelaktion bestätigt. Setup-Rechecks löschen
+ausstehende Einträge nicht. Die bestehende Approval-/Policy-Pipeline bleibt
+unverändert. Eine echte Exactly-once-Garantie würde einen gesondert genehmigten
+serverseitigen Idempotenz-Vertrag erfordern.
 
 ## TTS und Wiedergabe
 

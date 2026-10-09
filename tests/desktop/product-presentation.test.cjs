@@ -132,7 +132,8 @@ async function appHarness(apiOverrides = {}) {
   const { default: App } = load("../App.tsx", {
     react: hooks, "./api": api, "./app/AppShell": { AppShell },
     "./app/AppFeedback": { AppFeedback }, "./app/PresenceStage": { PresenceStage, runStateLabel },
-    "./app/ActionReview": { ActionReview }, "./setup/SetupStatusView": { SetupNotice },
+    "./app/ActionReview": { ActionReview }, "./voice/voiceReliability": load("../voice/voiceReliability.ts"),
+    "./setup/SetupStatusView": { SetupNotice },
     "./setup/GuidedInstaller": { GuidedInstaller: () => null }
   }, {
     Error, WebSocket: Socket,
