@@ -288,7 +288,7 @@ def test_stream_batches_tokens_normalizes_final_text_and_preserves_prompt(rig):
 
     async def check():
         await rig.service.start_run("session", "run", "Erzaehle etwas ueber Sterne")
-        assert event_order(rig) == ["received", "thinking", "token", "token", "message", "done"]
+        assert event_order(rig) == ["received", "thinking", "token", "token", "token", "message", "done"]
         assert [event["token"] for event in rig.events if event["event"] == "token"] == ["Hallo ", "mein Herr", "."]
         assert rig.events[-2]["content"] == "Hallo Sir."
         assert rig.trace[-4:] == ["db:add_message:assistant", "event:message", "event:done", "memory:compact"]
