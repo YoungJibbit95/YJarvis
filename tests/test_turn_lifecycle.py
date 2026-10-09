@@ -345,24 +345,36 @@ def test_stream_compacts_after_eighth_persisted_message(rig):
     asyncio.run(check())
 
 
-@pytest.mark.parametrize("planned", [
-    {"tool_name": "open_app", "tool_input": {"app_name": "Safari"}, "reason": "planner"},
-    None, {}, {"tool_name": "unknown", "tool_input": {}},
-    {"tool_name": "open_app", "tool_input": "invalid"}, RuntimeError("offline"),
+@pytest.mark.parametrize("planned,valid", [
+    ({"decision": "tool", "tool_name": "open_app",
+      "tool_input": {"app_name": "Safari"}}, True),
+    (None, False),
+    ({}, False),
+    ({"decision": "tool", "tool_name": "unknown", "tool_input": {}}, False),
+    ({"decision": "tool", "tool_name": "open_app", "tool_input": "invalid"}, False),
+    ({"decision": "tool", "tool_name": "open_app",
+      "tool_input": {"app_name": "Chrome"}}, False),
+    (RuntimeError("offline"), False),
 ])
-def test_optional_planner_preserves_validation_and_requires_approval(rig, planned):
+def test_optional_planner_preserves_validation_and_requires_approval(rig, planned, valid, monkeypatch):
+    from jarvis_agent.orchestration import semantic_pilot
+
+    monkeypatch.setattr(semantic_pilot, "supported_legacy_platform", lambda: True)
     rig.service = rig.enable("JARVIS_ENABLE_TOOL_PLANNER")
     rig.planner.side_effect = planned if isinstance(planned, Exception) else None
     rig.planner.return_value = planned
+    rig.set_stream(["Keine Aktion."])
 
     async def check():
-        await rig.service.start_run("session", "run", "mach xyz")
+        await rig.service.start_run("session", "run", "Aktiviere bitte die App Safari")
         rig.planner.assert_awaited_once()
-        valid = isinstance(planned, dict) and planned.get("reason") == "planner"
         assert len(await rig.db.list_pending_approvals()) == int(valid)
         assert rig.events[-1]["state"] == ("approval_required" if valid else "done")
         rig.tools.execute.assert_not_awaited()
-        rig.stream.assert_not_called()
+        if valid:
+            rig.stream.assert_not_called()
+        else:
+            rig.stream.assert_called_once()
 
     asyncio.run(check())
 
