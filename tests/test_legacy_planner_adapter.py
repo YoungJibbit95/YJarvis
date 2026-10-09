@@ -1,5 +1,4 @@
-"""Characterize the existing planner boundary before and after extraction."""
-
+"""Existing planner boundaries: opt-in safe semantic proposals, no tool execution."""
 import asyncio
 import ast
 import inspect
@@ -8,98 +7,108 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from jarvis_agent.orchestration import legacy_planner as planner_module
-from jarvis_agent.orchestration import legacy_routing, routing_stages
-from jarvis_agent.tool_intent import ToolCallIntent
+from jarvis_agent.orchestration import legacy_planner, legacy_routing, routing_stages, semantic_pilot
 from jarvis_agent.tools import ToolRegistry
-from test_turn_lifecycle import rig  # Reuse the real SQLite/lifecycle fixture.
+from test_turn_lifecycle import rig  # Reuse real SQLite / lifecycle fixture.
+
+planner_module = legacy_planner
 
 
 @pytest.fixture
 def planner(monkeypatch):
     tools = ToolRegistry()
     tools.execute = AsyncMock(side_effect=AssertionError("Planner must not execute"))
-    specs = tools.list_specs()
+    monkeypatch.setattr(semantic_pilot, "supported_legacy_platform", lambda: True)
+    specs = [s for s in tools.list_specs() if s["tool_name"] in semantic_pilot.PILOT_TOOL_NAMES]
     ranked = list(reversed(specs))
     learning = SimpleNamespace(
         rank_tool_specs_for_planner=AsyncMock(return_value=ranked),
-        apply_adaptive_routing=AsyncMock(side_effect=lambda intent: intent),
     )
-    call = AsyncMock(return_value={"tool_name": "open_app", "tool_input": {"app_name": "Safari"}})
+    call = AsyncMock(return_value={
+        "decision": "tool", "tool_name": "open_app", "tool_input": {"app_name": "Safari"},
+    })
     monkeypatch.setattr(planner_module, "plan_tool_call", call)
     adapter = planner_module.LegacyPlannerAdapter(tools, learning, enable_tool_planner=True)
-    return SimpleNamespace(plan=adapter.plan, adapter=adapter, tools=tools,
-                           learning=learning, call=call, specs=specs, ranked=ranked)
+    return SimpleNamespace(
+        plan=adapter.plan, adapter=adapter, tools=tools,
+        learning=learning, call=call, specs=specs, ranked=ranked,
+    )
 
 
-@pytest.mark.parametrize("enabled, message", [(False, "mach xyz"), (True, "Erzaehle etwas ueber Sterne")])
+@pytest.mark.parametrize("enabled,message", [
+    (False, "Aktiviere bitte die App Safari"),
+    (True, "Erzaehle etwas ueber Sterne"),
+    (True, "Wie spät ist es?"),
+    (True, '/tool unknown {"value":"Safari"}'),
+])
 def test_gating_skips_ranking_model_and_adaptation(planner, enabled, message):
     planner.adapter.enable_tool_planner = enabled
     assert asyncio.run(planner.plan(message, {})) is None
     planner.learning.rank_tool_specs_for_planner.assert_not_awaited()
     planner.call.assert_not_awaited()
-    planner.learning.apply_adaptive_routing.assert_not_awaited()
     planner.tools.execute.assert_not_awaited()
 
 
-@pytest.mark.parametrize("output, expected", [
-    (None, None),
-    ({}, None),
-    ({"tool_input": {}}, None),
-    ({"tool_name": "   ", "tool_input": {}}, None),
-    ({"tool_name": "open_app"}, None),
-    ({"tool_name": "open_app", "tool_input": "invalid"}, None),
-    ({"tool_name": "unknown", "tool_input": {}}, None),
-    (RuntimeError("offline"), None),
-    ({"tool_name": " open_app ", "tool_input": {"app_name": "Safari"}, "reason": "planner"},
-     ToolCallIntent("open_app", {"app_name": "Safari"}, "planner")),
-    ({"tool_name": "open_app", "tool_input": {}}, ToolCallIntent("open_app", {}, "LLM Planner")),
+@pytest.mark.parametrize("output,expected_tool", [
+    (None, False),
+    ({}, False),
+    ({"decision": "tool", "tool_name": "open_app"}, False),
+    ({"decision": "tool", "tool_name": "open_app", "tool_input": "invalid"}, False),
+    ({"decision": "tool", "tool_name": "unknown", "tool_input": {}}, False),
+    ({"decision": "tool", "tool_name": "file_write", "tool_input": {}}, False),
+    ({"decision": "tool", "tool_name": "open_app", "tool_input": {}}, False),
+    ({"decision": "tool", "tool_name": "open_app", "tool_input": {"app_name": "Chrome"}}, False),
+    (RuntimeError("offline"), False),
+    ({"decision": "tool", "tool_name": "open_app", "tool_input": {"app_name": "Safari"}}, True),
 ])
-def test_result_validation_and_model_exception_fallback(planner, output, expected):
+def test_result_validation_and_model_exception_fallback(planner, output, expected_tool):
     if isinstance(output, Exception):
         planner.call.side_effect = output
     else:
         planner.call.return_value = output
-    assert asyncio.run(planner.plan("mach xyz", {})) == expected
+    decision = asyncio.run(planner.plan("Aktiviere bitte die App Safari", {}))
+    assert (decision is not None and decision.kind == "tool") == expected_tool
+    if expected_tool:
+        assert decision.intent.tool_name == "open_app"
+        assert decision.intent.tool_input == {"app_name": "Safari"}
     planner.learning.rank_tool_specs_for_planner.assert_awaited_once_with(planner.specs)
     planner.call.assert_awaited_once_with(
         base_url="http://127.0.0.1:11434", model="qwen2.5:3b-instruct",
-        user_message="mach xyz", tool_specs=planner.ranked,
+        user_message="Aktiviere bitte die App Safari", tool_specs=planner.ranked,
     )
-    if expected is None:
-        planner.learning.apply_adaptive_routing.assert_not_awaited()
-    else:
-        planner.learning.apply_adaptive_routing.assert_awaited_once_with(expected)
     planner.tools.execute.assert_not_awaited()
 
 
 def test_settings_and_ranked_specs_reach_same_model_call(planner):
-    asyncio.run(planner.plan("mach xyz", {"ollama_base_url": "http://model:1234", "model_name": "custom"}))
+    asyncio.run(planner.plan("Aktiviere bitte die App Safari", {
+        "ollama_base_url": "http://model:1234", "model_name": "custom",
+    }))
     planner.call.assert_awaited_once_with(
-        base_url="http://model:1234", model="custom", user_message="mach xyz", tool_specs=planner.ranked,
+        base_url="http://model:1234", model="custom",
+        user_message="Aktiviere bitte die App Safari", tool_specs=planner.ranked,
     )
+    assert {x["tool_name"] for x in planner.ranked} == semantic_pilot.PILOT_TOOL_NAMES
 
 
-@pytest.mark.parametrize("failure_stage", ["ranking", "adaptation"])
+@pytest.mark.parametrize("failure_stage", ["ranking", "model"])
 def test_exception_boundary_is_not_broadened(planner, failure_stage):
-    target = (planner.learning.rank_tool_specs_for_planner if failure_stage == "ranking"
-              else planner.learning.apply_adaptive_routing)
+    target = planner.learning.rank_tool_specs_for_planner if failure_stage == "ranking" else planner.call
     target.side_effect = RuntimeError(failure_stage)
-    with pytest.raises(RuntimeError, match=failure_stage):
-        asyncio.run(planner.plan("mach xyz", {}))
-    assert planner.call.await_count == int(failure_stage == "adaptation")
+    assert asyncio.run(planner.plan("Aktiviere bitte die App Safari", {})) is None
+    assert planner.call.await_count == int(failure_stage == "model")
     planner.tools.execute.assert_not_awaited()
 
 
 def test_model_cancellation_propagates(planner):
     planner.call.side_effect = asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(planner.plan("mach xyz", {}))
-    planner.learning.apply_adaptive_routing.assert_not_awaited()
+        asyncio.run(planner.plan("Aktiviere bitte die App Safari", {}))
+    planner.tools.execute.assert_not_awaited()
 
 
 @pytest.mark.parametrize("learned", [False, True])
 def test_deterministic_intent_wins_before_model_call(rig, learned, monkeypatch):
+    monkeypatch.setattr(semantic_pilot, "supported_legacy_platform", lambda: True)
     rig.service = rig.enable("JARVIS_ENABLE_TOOL_PLANNER")
     adapter = rig.service.turn_engine.routing.planner
     plan = AsyncMock(wraps=adapter.plan)
@@ -108,7 +117,8 @@ def test_deterministic_intent_wins_before_model_call(rig, learned, monkeypatch):
     async def check():
         if learned:
             await rig.db.upsert_learned_command(
-                trigger="oeffne Safari", tool_name="open_app", tool_input={"app_name": "Notes"},
+                trigger="oeffne Safari", tool_name="open_app",
+                tool_input={"app_name": "Notes"},
             )
         await rig.service.start_run("session", "run", "oeffne Safari")
         approval = (await rig.db.list_pending_approvals())[0]
@@ -130,19 +140,22 @@ def test_unset_runtime_flag_keeps_planner_off(rig, monkeypatch):
     assert rig.events[-1]["detail"] == "Tool-Aufruf unklar, keine Ausfuehrung"
 
 
-def test_planned_intent_uses_real_adaptation_then_requires_approval(rig):
+def test_planned_intent_stays_in_allowlist_and_requires_approval(rig, monkeypatch):
+    monkeypatch.setattr(semantic_pilot, "supported_legacy_platform", lambda: True)
     rig.service = rig.enable("JARVIS_ENABLE_TOOL_PLANNER")
     rig.planner.side_effect = None
-    rig.planner.return_value = {"tool_name": "open_app", "tool_input": {"app_name": "Raycast"}, "reason": "planner"}
+    rig.planner.return_value = {
+        "decision": "tool", "tool_name": "open_app", "tool_input": {"app_name": "Raycast"},
+    }
 
     async def check():
         for _ in range(3):
             await rig.db.record_tool_learning(tool_name="raycast_open", success=True, latency_ms=10)
-        await rig.service.start_run("session", "run", "mach xyz")
+        await rig.service.start_run("session", "run", "Aktiviere bitte die App Raycast")
         approval = (await rig.db.list_pending_approvals())[0]
-        assert (approval["tool_name"], approval["tool_input"]) == ("raycast_open", {"fallback_text": ""})
+        assert (approval["tool_name"], approval["tool_input"]) == ("open_app", {"app_name": "Raycast"})
         assert rig.events[-1]["state"] == "approval_required"
-        assert rig.events[-1]["data"]["reason"] == "planner + adaptives Lernrouting"
+        assert rig.events[-1]["data"]["reason"] == "Validierter lokaler Semantic-Pilot"
         rig.planner.assert_awaited_once()
         rig.tools.execute.assert_not_awaited()
     asyncio.run(check())
@@ -150,10 +163,13 @@ def test_planned_intent_uses_real_adaptation_then_requires_approval(rig):
 
 @pytest.mark.parametrize("enabled", [False, True])
 def test_learn_planner_resolution_does_not_recurse_or_replan_trigger(rig, enabled, monkeypatch):
+    monkeypatch.setattr(semantic_pilot, "supported_legacy_platform", lambda: True)
     if enabled:
         rig.service = rig.enable("JARVIS_ENABLE_TOOL_PLANNER")
     rig.planner.side_effect = None
-    rig.planner.return_value = {"tool_name": "open_app", "tool_input": {"app_name": "Safari"}}
+    rig.planner.return_value = {
+        "decision": "tool", "tool_name": "open_app", "tool_input": {"app_name": "Safari"},
+    }
 
     async def check():
         await rig.db.upsert_learned_command(
@@ -163,19 +179,9 @@ def test_learn_planner_resolution_does_not_recurse_or_replan_trigger(rig, enable
         monkeypatch.setattr(rig.service.learning, "resolve_learned_command_intent", resolver)
         await rig.service.start_run("session", "learn", '/learn "fokus" => mach xyz')
         resolver.assert_not_awaited()
-        stored = await rig.db.get_learned_command("fokus")
-        assert rig.planner.await_count == int(enabled)
+        assert await rig.db.get_learned_command("fokus") is None
+        rig.planner.assert_not_awaited()  # Never persist unverified semantic meaning.
         assert await rig.db.list_pending_approvals() == []
-        if enabled:
-            assert (stored["tool_name"], stored["tool_input"]) == ("open_app", {"app_name": "Safari"})
-            assert rig.planner.call_args.kwargs["user_message"] == "mach xyz"
-            await rig.service.start_run("session", "execute", "fokus")
-            approval = (await rig.db.list_pending_approvals())[0]
-            assert (approval["tool_name"], approval["tool_input"]) == ("open_app", {"app_name": "Safari"})
-            assert rig.planner.await_count == 1
-            resolver.assert_awaited_once_with("fokus")
-        else:
-            assert stored is None
         rig.tools.execute.assert_not_awaited()
     asyncio.run(check())
 

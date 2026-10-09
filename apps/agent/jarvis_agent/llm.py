@@ -126,6 +126,15 @@ async def complete_chat(
     return str(data.get("message", {}).get("content", "")).strip()
 
 
+def _unique_json_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON field")
+        result[key] = value
+    return result
+
+
 async def plan_tool_call(
     *,
     base_url: str,
@@ -133,54 +142,42 @@ async def plan_tool_call(
     user_message: str,
     tool_specs: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
+    """One bounded, non-streaming interpretation; no executable free text."""
+    if not tool_specs or len(user_message) > 350:
+        return None
+
     planner_prompt = (
-        "Du bist ein Tool Planner. Entscheide, ob ein Tool-Aufruf noetig ist. "
-        "Antworte NUR als JSON-Objekt mit Schema: "
-        "{\"should_call_tool\":bool,\"tool_name\":string,\"tool_input\":object,\"reason\":string}. "
-        "Wenn kein Tool noetig ist, should_call_tool=false und leere Felder setzen."
+        "Du klassifizierst NUR einen ausdruecklichen, unklaren Computerauftrag. "
+        "Antworte ausschliesslich mit EINEM JSON-Objekt, ohne Markdown, Erklaerung "
+        "oder Gedankengang. Genau eine Form: "
+        '{"decision":"conversation"} ODER '
+        '{"decision":"clarify","question":"Eine kurze Frage?"} ODER '
+        '{"decision":"tool","tool_name":"aus_allowlist","tool_input":{}}. '
+        "Die Tool-Argumente muessen im Benutzertext ausdruecklich stehen; "
+        "keine App, URL, Person, Menge oder Datei erfinden. "
+        "Falls unklar, nur eine Rueckfrage oder conversation. "
+        "Nie mehrere Tools, Shell, Code oder Aktionsfreigaben erzeugen. "
+        "Erlaubte Tools mit rein informellen Feldtypen: "
+        + json.dumps(tool_specs, ensure_ascii=False, separators=(",", ":"))
     )
-
-    planner_messages = [
-        {
-            "role": "system",
-            "content": planner_prompt
-            + " Verfuegbare Tools: "
-            + json.dumps(tool_specs, ensure_ascii=False),
-        },
-        {
-            "role": "user",
-            "content": user_message,
-        },
-    ]
-
     raw = await complete_chat(
         base_url=base_url,
         model=model,
-        messages=planner_messages,
+        messages=[
+            {"role": "system", "content": planner_prompt},
+            {"role": "user", "content": user_message},
+        ],
         temperature=0.0,
-        timeout_seconds=25.0,
+        timeout_seconds=8.0,
     )
-
-    blob = _extract_json_blob(raw)
-    if not blob:
+    if not isinstance(raw, str) or not 2 <= len(raw) <= 4096:
         return None
-
     try:
-        parsed = json.loads(blob)
-    except json.JSONDecodeError:
+        data = json.loads(
+            raw.strip(),
+            object_pairs_hook=_unique_json_fields,
+            parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Nonfinite JSON")),
+        )
+    except (ValueError, TypeError, json.JSONDecodeError):
         return None
-
-    if not parsed.get("should_call_tool"):
-        return None
-
-    tool_name = parsed.get("tool_name")
-    tool_input = parsed.get("tool_input")
-
-    if not isinstance(tool_name, str) or not isinstance(tool_input, dict):
-        return None
-
-    return {
-        "tool_name": tool_name,
-        "tool_input": tool_input,
-        "reason": str(parsed.get("reason", "")),
-    }
+    return data if isinstance(data, dict) else None

@@ -29,6 +29,7 @@ def router(tmp_path, monkeypatch):
         "tool_name": "open_app", "tool_input": {"app_name": "Notes"}, "reason": "planner",
     })
     monkeypatch.setattr(planner_module, "plan_tool_call", planner)
+    monkeypatch.setattr(planner_module.semantic_pilot, "supported_legacy_platform", lambda: True)
     routing = routing_module.LegacyRouting(tools, learning, responses, enable_tool_planner=True)
     return SimpleNamespace(db=db, routing=routing, learning=learning, responses=responses, planner=planner)
 
@@ -63,7 +64,12 @@ def test_first_matching_stage_wins_even_when_all_later_stages_match(router, monk
                         AsyncMock(side_effect=candidate("learning", "learning")))
     monkeypatch.setattr(router.learning, "resolve_learned_command_intent",
                         AsyncMock(side_effect=candidate("learned", intent)))
-    router.planner.side_effect = candidate("planner", router.planner.return_value)
+    from jarvis_agent.orchestration.semantic_pilot import SemanticDecision
+
+    router.routing.planner.plan = AsyncMock(side_effect=candidate(
+        "planner",
+        SemanticDecision("tool", ToolCallIntent("open_app", {"app_name": "Notes"}, "planner")),
+    ))
     result = route(router, "mach xyz")
     assert visited == ORDER[:ORDER.index(winner) + 1]
     if winner in {"learned", "heuristic", "planner"}:
@@ -388,12 +394,13 @@ def test_unregistered_heuristic_reaches_only_enabled_legacy_planner(router, enab
 
 
 def test_learn_action_retains_existing_planner_callback(router):
-    result = route(router, '/learn "fokus" => mach xyz')
+    # A new learned command must be grounded in a deterministic action, not
+    # persisted from an unverified semantic fallback.
+    result = route(router, '/learn "fokus" => oeffne Safari')
     assert result.detail == "Lernmodus aktualisiert"
-    router.planner.assert_awaited_once()
-    assert router.planner.call_args.kwargs["user_message"] == "mach xyz"
-    assert route(router, "fokus").intent.tool_input == {"app_name": "Notes"}
-    assert router.planner.await_count == 1
+    router.planner.assert_not_awaited()
+    assert route(router, "fokus").intent.tool_input == {"app_name": "Safari"}
+    router.planner.assert_not_awaited()
 
 
 def test_stage_module_has_no_lifecycle_model_or_platform_imports():
