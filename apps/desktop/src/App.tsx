@@ -32,7 +32,7 @@ import { AppFeedback, type ConnectionState, type FailureKind, type Failures } fr
 import { ActionReview } from "./app/ActionReview";
 import { SetupNotice } from "./setup/SetupStatusView";
 import type { SetupCheck } from "./setup/types";
-import { IntelligentSettings } from "./components/IntelligentSettings";
+import { IntelligentSettings } from "./settings/IntelligentSettings";
 import { microphoneConstraints, microphoneErrorMessage, persistMicrophonePreference, readMicrophonePreference } from "./voice/microphoneDevices";
 import { ChatSubmissionError } from "./api";
 import {

@@ -14,10 +14,22 @@ for (const scenario of ["healthy", "backend-missing", "ollama-missing"]) {
     const calls = [];
     let handler;
     let windowControl;
+    let permissionRequest, permissionCheck, permissionStatus;
+    const windows = [];
+    const mediaSession = {
+      setPermissionRequestHandler(fn) { permissionRequest = fn; },
+      setPermissionCheckHandler(fn) { permissionCheck = fn; }
+    };
     const owner = {};
     class BrowserWindow {
-      constructor(options) { assert.equal(options.frame, false); assert.equal(options.autoHideMenuBar, true); calls.push("window"); }
-      loadURL(url) { calls.push(url); }
+      constructor(options) {
+        assert.equal(options.frame, false); assert.equal(options.autoHideMenuBar, true);
+        this.webContents = { mainFrame: { url: "" } };
+        windows.push(this);
+        calls.push("window");
+      }
+      loadURL(url) { this.webContents.mainFrame.url = url; calls.push(url); }
+      static getAllWindows() { return windows; }
       static fromWebContents() { return { close() { calls.push("close"); }, minimize() { calls.push("minimize"); }, isMaximized() { return false; }, maximize() { calls.push("maximize"); } }; }
     }
     const startup = {
@@ -51,22 +63,44 @@ for (const scenario of ["healthy", "backend-missing", "ollama-missing"]) {
       require(name) {
         if (name === "electron") return {
           app, BrowserWindow,
-          Menu: { setApplicationMenu(menu) { assert.equal(menu, null); } }, ipcMain: { on(channel, callback) { assert.equal(channel, "jarvis:window-control"); windowControl = callback; } },
+          session: { defaultSession: mediaSession },
+          systemPreferences: { getMediaAccessStatus: () => "unknown", askForMediaAccess: async () => false },
+          Menu: { setApplicationMenu(menu) { assert.equal(menu, null); } },
+          ipcMain: {
+            on(channel, callback) { assert.equal(channel, "jarvis:window-control"); windowControl = callback; },
+            handle(channel, callback) { assert.equal(channel, "jarvis:microphone-permission-status"); permissionStatus = callback; }
+          },
           protocol: { registerSchemesAsPrivileged(schemes) { assert.equal(schemes[0].privileges.corsEnabled, true); }, handle(scheme, callback) { assert.equal(scheme, "app"); handler = callback; } },
           dialog: { showErrorBox(title, message) { assert.equal(message, "backend missing"); calls.push("error"); } }
         };
         if (name === "path" || name === "node:url") return require(name);
         if (name === path.join("resources", "startup.cjs")) return startup;
         if (name === "./packaged.cjs") return packaged;
+        if (name === "./microphone-permissions.cjs") {
+          return require("../../apps/desktop/electron/microphone-permissions.cjs");
+        }
         throw new Error(`Unexpected import ${name}`);
       }
     });
     await new Promise(setImmediate);
+    assert.equal(typeof permissionRequest, "function");
+    assert.equal(typeof permissionCheck, "function");
+    assert.equal(typeof permissionStatus, "function");
     assert.equal(handler({ url: "app://other/index.html" }).status, 404);
     if (scenario === "backend-missing") {
       assert.deepEqual(calls, ["backend", "error"]);
       assert.equal(app.quitCalled, true);
     } else {
+      const webContents = windows[0].webContents;
+      assert.equal(permissionCheck(webContents, "media", "app://yjarvis", {
+        mediaType: "audio", securityOrigin: "app://yjarvis", isMainFrame: true
+      }), true);
+      assert.equal(permissionCheck(webContents, "media", "app://yjarvis", {
+        mediaType: "video", securityOrigin: "app://yjarvis", isMainFrame: true
+      }), false);
+      const permissionEvent = { sender: webContents, senderFrame: webContents.mainFrame };
+      assert.equal(permissionStatus(permissionEvent), "unknown");
+      assert.equal(permissionStatus({ ...permissionEvent, senderFrame: { url: "https://evil.test" } }), "unknown");
       assert.deepEqual(calls, scenario === "ollama-missing"
         ? ["backend", "health", "window", "app://yjarvis/index.html"]
         : ["backend", "health", "health", "window", "app://yjarvis/index.html"]);

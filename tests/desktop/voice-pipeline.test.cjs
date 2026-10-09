@@ -119,7 +119,7 @@ async function makeHarness(overrides = {}) {
     "./app/ActionReview": { ActionReview: () => null },
     "./setup/SetupStatusView": { SetupNotice: () => null },
     "./setup/GuidedInstaller": { GuidedInstaller: () => null },
-    "./components/IntelligentSettings": { IntelligentSettings: () => null },
+    "./settings/IntelligentSettings": { IntelligentSettings: () => null },
     "./voice/microphoneDevices": microphone
   }, {
     Date: Clock, Blob, Error, MediaRecorder: Recorder, WebSocket: Socket,

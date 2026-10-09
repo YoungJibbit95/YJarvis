@@ -135,7 +135,7 @@ async function appHarness(apiOverrides = {}) {
     "./app/ActionReview": { ActionReview }, "./voice/voiceReliability": load("../voice/voiceReliability.ts"),
     "./setup/SetupStatusView": { SetupNotice },
     "./setup/GuidedInstaller": { GuidedInstaller: () => null },
-    "./components/IntelligentSettings": { IntelligentSettings: () => null },
+    "./settings/IntelligentSettings": { IntelligentSettings: () => null },
     "./voice/microphoneDevices": load("../voice/microphoneDevices.ts")
   }, {
     Error, WebSocket: Socket,
