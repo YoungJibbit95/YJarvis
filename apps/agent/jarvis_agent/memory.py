@@ -17,8 +17,14 @@ async def load_context_snippets(
     db: Database,
     user_input: str,
     limit: int = 4,
+    *,
+    session_id: str | None = None,
 ) -> list[str]:
-    rows = await db.search_memory(user_input, limit=limit)
+    # Scoped prompt recall must not pull private memories from another session.
+    if session_id is None:
+        rows = await db.search_memory(user_input, limit=limit)
+    else:
+        rows = await db.search_memory(user_input, limit=limit, session_id=session_id)
     if not rows:
         return []
 

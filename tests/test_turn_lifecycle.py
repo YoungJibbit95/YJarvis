@@ -288,8 +288,8 @@ def test_stream_batches_tokens_normalizes_final_text_and_preserves_prompt(rig):
 
     async def check():
         await rig.service.start_run("session", "run", "Erzaehle etwas ueber Sterne")
-        assert event_order(rig) == ["received", "thinking", "token", "token", "message", "done"]
-        assert [event["token"] for event in rig.events if event["event"] == "token"] == ["Hallo mein Herr", "."]
+        assert event_order(rig) == ["received", "thinking", "token", "token", "token", "message", "done"]
+        assert [event["token"] for event in rig.events if event["event"] == "token"] == ["Hallo ", "mein Herr", "."]
         assert rig.events[-2]["content"] == "Hallo Sir."
         assert rig.trace[-4:] == ["db:add_message:assistant", "event:message", "event:done", "memory:compact"]
         prompt = rig.stream.call_args.kwargs
@@ -411,6 +411,95 @@ def test_token_interval_flushes_before_size_threshold(rig, monkeypatch):
     asyncio.run(rig.service.start_run("session", "run", "Erzaehle etwas ueber Sterne"))
     assert [event["token"] for event in rig.events if event["event"] == "token"] == ["ab", "cd"]
     assert rig.events[-1]["state"] == "done"
+
+
+
+def test_first_llm_token_published_before_slow_second_token(rig):
+    """The browser may show meaningful streamed text without waiting for token #2."""
+    release_second = asyncio.Event()
+    first_token_visible = asyncio.Event()
+
+    async def generate(**kwargs):
+        yield "Hallo"
+        await release_second.wait()
+        yield " zurück!"
+
+    rig.stream.side_effect = generate
+    original = rig.service.turn_engine.responses.emit_token
+
+    async def capture_first(session_id, run_id, token):
+        await original(session_id, run_id, token)
+        if token == "Hallo":
+            first_token_visible.set()
+
+    rig.service.turn_engine.responses.emit_token = capture_first
+
+    async def scenario():
+        task = asyncio.create_task(rig.service.start_run("session", "run", "Erzähl mir etwas über Sterne"))
+        await asyncio.wait_for(first_token_visible.wait(), timeout=1)
+        assert [event["token"] for event in rig.events if event["event"] == "token"] == ["Hallo"]
+        assert "done" not in event_order(rig)
+        release_second.set()
+        await task
+        assert [event["token"] for event in rig.events if event["event"] == "token"] == [
+            "Hallo", " zurück!"
+        ]
+        assert rig.events[-1]["state"] == "done"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("utterance,tool_name,expected_fields", [
+    ("Musik anhalten", "music_control", {"action": "pause"}),
+    ("Musik fortsetzen", "music_control", {"action": "play"}),
+    ("Stoppe die Musik", "music_control", {"action": "pause"}),
+    ("Offene Erinnerungen", "reminder_list", {}),
+    ("Kommende Termine", "calendar_list_events", {}),
+    ("Verfasse eine Mail", "mail_create_draft", {}),
+    ("Erzeuge eine Notiz", "notes_create", {}),
+    ("Zwischenablage lesen", "clipboard_read", {}),
+    ("raycast befehl raycast/file-search/search-files mit text ~/Desktop",
+     "raycast_run_command", {"owner": "raycast", "extension": "file-search", "command": "search-files"}),
+])
+def test_review_legacy_command_must_wait_for_explicit_tool_approval(
+    rig, utterance, tool_name, expected_fields,
+):
+    async def check():
+        await rig.service.start_run("session", "run", utterance)
+        assert event_order(rig) == ["received", "thinking", "approval_required"]
+        approvals = await rig.db.list_pending_approvals()
+        assert len(approvals) == 1
+        assert approvals[0]["tool_name"] == tool_name
+        for key, value in expected_fields.items():
+            assert approvals[0]["tool_input"][key] == value
+        assert rig.events[-1]["data"]["approval"] == approvals[0]
+        rig.tools.execute.assert_not_awaited()
+        rig.planner.assert_not_awaited()
+        rig.stream.assert_not_called()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("utterance", [
+    "Ich möchte über meine Erinnerungen sprechen.",
+    "Erkläre mir, wie Notizen funktionieren.",
+    "Warum sollte ich die Musik anhalten?",
+    "Welche Möglichkeiten bietet Raycast?",
+    "Mach es kürzer.",
+    "Erklär mir das einfacher.",
+    "Ich möchte über Dateien reden.",
+])
+def test_review_conversation_never_creates_approval_or_executes(rig, utterance):
+    rig.set_stream(["Eine normale Antwort."])
+
+    async def check():
+        await rig.service.start_run("session", "run", utterance)
+        assert event_order(rig) == ["received", "thinking", "token", "message", "done"]
+        assert await rig.db.list_pending_approvals() == []
+        rig.tools.execute.assert_not_awaited()
+        rig.planner.assert_not_awaited()
+
+    asyncio.run(check())
 
 
 def test_learned_command_wins_over_heuristic_and_planner(rig):

@@ -6,62 +6,27 @@ from pathlib import Path
 from typing import Any
 
 from .db import normalize_learned_trigger
+from .tool_intent import infer_heuristic_tool_call
 
-TOOL_REQUEST_HINTS = (
-    "oeffne",
-    "öffne",
-    "oeffnen",
-    "öffnen",
-    "open",
-    "starte",
-    "starten",
-    "start",
-    "launch",
-    "reminder",
-    "erinnerung",
-    "kalender",
-    "calendar",
-    "clipboard",
-    "zwischenablage",
-    "copy",
-    "paste",
-    "read file",
-    "write file",
-    "datei",
-    "url",
-    "browser",
-    "raycast",
-    "setze",
-    "schreibe",
-    "fuehre aus",
-    "mach",
+# Recognize action verbs with word boundaries, not arbitrary substrings.
+TOOL_ACTION_RE = re.compile(
+    r"(?i)\b(?:oeffne|öffne|oeffnen|öffnen|open|starte|starten|start|launch|"
+    r"kopiere|kopier|paste|setze|schreibe|schreib|fuehre|führe|"
+    r"erinner(?:e)?\s+mich|remind\s+me|"
+    r"zeige|suche|finde|liste|plane|trag(?:e)?|pausiere|pausieren|"
+    r"sende|schicke|notiere|erstell(?:e)?|loesch(?:e)?|lösche|"
+    r"lies|lese|read|write)\b"
 )
-
-DATE_HINTS = (
-    "welches datum",
-    "welcher tag",
-    "datum",
-    "date",
-    "heute ist",
+META_DISCUSSION_RE = re.compile(
+    r"(?i)^(?:ich (?:möchte|moechte|will|würde gern|wuerde gern)\s+"
+    r"(?:über|ueber)\b|"
+    r"(?:wie|warum|wieso|weshalb|was|welche|welcher)\b|"
+    r"(?:erklär|erkläre|erklaere|erzähl|erzaehl|beschreib)\b|"
+    r"kannst du (?:mir )?(?:erklären|erklaeren|erzählen|erzaehlen)\b)"
 )
-
-TIME_HINTS = (
-    "wie spaet",
-    "wie spät",
-    "uhrzeit",
-    "wie viel uhr",
-    "wieviel uhr",
-    "time",
-    "aktuelle zeit",
-)
-
-READINESS_HINTS = (
-    "bist du da",
-    "bist du online",
-    "bist du bereit",
-    "bereit",
-    "online",
-    "jarvis",
+SHORT_FOLLOWUP_RE = re.compile(
+    r"(?i)^(?:mach|mache)\s+(?:es|das|die antwort)\s+"
+    r"(?:kürzer|kuerzer|einfacher|genauer|verständlicher|verstaendlicher)\b"
 )
 
 WEEKDAY_HINTS = (
@@ -101,10 +66,28 @@ GERMAN_WEEKDAY_BY_INDEX = {
 
 
 def looks_like_tool_request(user_message: str) -> bool:
-    lowered = user_message.strip().lower()
-    if not lowered:
+    message = strip_jarvis_prefix(user_message).strip().lower()
+    message = re.sub(r"(?i)^bitte[\s,]+", "", message)
+    if not message:
         return False
-    return any(hint in lowered for hint in TOOL_REQUEST_HINTS)
+    if message.startswith("/tool "):
+        return True
+    if SHORT_FOLLOWUP_RE.match(message) or META_DISCUSSION_RE.match(message):
+        return False
+    # Keep an ambiguous "mach xyz" in the clarification path, never execute it.
+    if re.match(r"^(?:mach|mache)\s+", message):
+        return True
+    if re.search(r"\b(?:datei|file)\s+(?:lesen|schreiben|read|write)\b", message):
+        return True
+    if re.search(r"\b(?:musik|music)\s+(?:pausieren|pause|weiter|stoppen)\b", message):
+        return True
+    if TOOL_ACTION_RE.search(message):
+        return True
+    # The established deterministic parser also supports valid noun-first and
+    # alternative-verb forms (e.g. "Offene Erinnerungen", "Musik anhalten",
+    # "Verfasse eine Mail"). A second, shorter verb list must not silently
+    # shadow those legacy intents. Pure recognition does not execute a tool.
+    return infer_heuristic_tool_call(message) is not None
 
 
 def normalize_honorifics(text: str) -> str:
@@ -227,140 +210,141 @@ def tool_performance_score(stats: dict[str, Any] | None) -> float:
 
 def quick_local_reply(user_message: str) -> str | None:
     normalized = re.sub(r"\s+", " ", user_message.strip())
-    lowered = normalized.lower()
-    if not lowered:
+    lowered = strip_jarvis_prefix(normalized).lower().strip(" \t.,!?;:")
+    if not lowered or len(lowered) > 90 or looks_like_tool_request(lowered):
         return None
 
-    if len(lowered) > 90:
-        return None
-
-    if looks_like_tool_request(lowered):
-        return None
-
-    if re.fullmatch(r"(danke(?: dir)?(?: schoen| schön)?(?: jarvis| sir)?|vielen dank(?:.*)?)", lowered):
-        return "Gern, Sir. Soll ich direkt den naechsten Schritt fuer Sie uebernehmen?"
-
-    if re.fullmatch(r"(hallo(?: jarvis)?|hi(?: jarvis)?|hey(?: jarvis)?|guten (?:morgen|tag|abend)(?: jarvis)?)", lowered):
-        return "Natuerlich, Sir. Womit kann ich helfen?"
-
-    if re.fullmatch(r"(ok(?:ay)?|passt|perfekt|super|alles klar)", lowered):
-        return "Verstanden, Sir."
-
-    if re.search(r"\b(help|hilfe|was kannst du|capabilities|funktionen)\b", lowered):
+    if re.fullmatch(
+        r"(?:danke(?: dir)?(?: schoen| schön)?(?:,?\s*(?:jarvis|sir))?|"
+        r"vielen dank(?:,?\s*(?:jarvis|sir))?)", lowered
+    ):
+        return "Gerne."
+    if re.fullmatch(
+        r"(?:hallo|hi|hey|guten (?:morgen|tag|abend))(?:,?\s*jarvis)?", lowered
+    ):
+        return "Hallo! Wie kann ich helfen?"
+    if re.fullmatch(r"(?:ok(?:ay)?|passt|perfekt|super|alles klar)", lowered):
+        return "Alles klar."
+    if re.fullmatch(
+        r"(?:help|hilfe|was kannst du(?: alles)?|"
+        r"welche (?:funktionen|faehigkeiten|fähigkeiten) hast du)", lowered
+    ):
         return (
             "Ich kann lokal Chat, Notizen, Erinnerungen, Kalender, Kontakte, Mail-Entwuerfe, Nachrichten, Musiksteuerung, "
             "Raycast, App/URL-Start, Zwischenablage sowie sichere Dateiaktionen mit Freigaben ausfuehren. "
-            "Zusatz: Ich kann neue Trigger lernen (`/learn`) und Ihre bevorzugten Tools lokal optimieren."
+            "Zusatz: Ich kann neue Trigger lernen (/learn) und bevorzugte Tools lokal optimieren."
         )
-
     return None
 
 
 def quick_system_status_reply(user_message: str, settings: dict[str, Any]) -> str | None:
-    normalized = re.sub(r"\s+", " ", user_message.strip())
+    normalized = re.sub(r"\s+", " ", strip_jarvis_prefix(user_message).strip())
     lowered = normalized.lower()
-    if not lowered:
+    if not lowered or len(lowered) > 140 or looks_like_tool_request(lowered):
         return None
-
-    if len(lowered) > 140:
-        return None
-
-    status_hints = (
-        "status",
-        "modell",
-        "model",
-        "whisper",
-        "stt",
-        "tts",
-        "engine",
-        "welches modell",
-    )
-    if not any(hint in lowered for hint in status_hints):
+    if not (
+        re.search(r"\b(?:systemstatus|status|systemübersicht|systemuebersicht)\b", lowered)
+        or re.search(r"\b(?:welches modell|welchen (?:whisper|stt|tts)|welche (?:stimme|engine))\b", lowered)
+        or re.search(r"\b(?:modell|whisper|stt|tts)\b.*\b(?:nutzt|benutzt|verwendest|konfiguriert)\b", lowered)
+    ):
         return None
 
     model = str(settings.get("model_name", "-")).strip() or "-"
     whisper_model = Path(str(settings.get("whisper_model_path", "")).strip()).name or "auto"
     tts_engine = str(settings.get("tts_engine", "piper")).strip() or "piper"
     tts_voice = str(settings.get("tts_voice", "")).strip() or "-"
-
+    # Configuration does not establish live process, model or device health.
     return (
-        f"Systemstatus: Modell {model}, STT {whisper_model}, "
-        f"TTS {tts_engine} ({tts_voice}), alles lokal."
+        f"Konfiguriert: Modell {model}, STT {whisper_model}, "
+        f"TTS {tts_engine} ({tts_voice}). Das ist keine Live-Systemprüfung."
     )
 
 
 def quick_utility_reply(user_message: str) -> str | None:
-    normalized = re.sub(r"\s+", " ", user_message.strip())
-    lowered = normalized.lower()
-    if not lowered:
-        return None
-
+    original = user_message.strip().lower().strip(" \t.,!?;:")
+    normalized = re.sub(r"\s+", " ", strip_jarvis_prefix(user_message).strip())
+    lowered = normalized.lower().strip(" \t.,!?;:")
+    lowered = re.sub(r"^bitte[\s,]+", "", lowered)
     if len(lowered) > 120:
         return None
 
-    if any(hint in lowered for hint in TIME_HINTS):
+    time_questions = (
+        r"(?:wie (?:spät|spaet) (?:ist es|haben wir es)(?: gerade| jetzt)?|"
+        r"wie (?:viel|viele) uhr (?:ist es|haben wir)(?: gerade| jetzt)?|"
+        r"(?:was ist |sag(?:e)? mir )?(?:die |unsere )?(?:aktuelle )?uhrzeit|"
+        r"welche uhrzeit (?:ist es|haben wir))"
+    )
+    date_questions = (
+        r"(?:welches datum (?:haben wir|ist heute|ist es)?|"
+        r"welcher tag (?:ist heute|ist es heute)|"
+        r"was (?:ist heute|haben wir heute) (?:für|fuer) (?:ein|einen) (?:datum|tag)|"
+        r"heute)"
+    )
+    if re.fullmatch(time_questions, lowered):
         now = datetime.now()
         return f"Aktuelle lokale Zeit: {now.strftime('%H:%M')} Uhr."
-
-    if any(hint in lowered for hint in DATE_HINTS) or re.fullmatch(r"(heute\??|welches datum\??)", lowered):
+    if re.fullmatch(date_questions, lowered):
         now = datetime.now()
         weekday = GERMAN_WEEKDAY_BY_INDEX.get(now.weekday(), now.strftime("%A"))
         return f"Heute ist {weekday}, der {now.strftime('%d.%m.%Y')}."
-
-    if re.fullmatch(r"(jarvis\??|bist du da\??|online\??|bereit\??)", lowered) or any(
-        hint in lowered for hint in READINESS_HINTS
+    if original == "jarvis" or re.fullmatch(
+        r"(?:bist du (?:da|online|bereit)|(?:bist )?bereit|online)", lowered
     ):
-        if len(lowered.split()) <= 4:
-            return "Ja, Sir. Systeme laufen stabil und ich bin einsatzbereit."
-
+        return "Ja, ich bin da."
     return None
 
 
 def quick_clarification_reply(user_message: str) -> str | None:
-    normalized = re.sub(r"\s+", " ", user_message.strip())
+    normalized = re.sub(r"\s+", " ", strip_jarvis_prefix(user_message).strip())
     lowered = normalized.lower()
-    if not lowered:
+    if not lowered or len(lowered) > 180:
         return None
 
-    if len(lowered) > 180:
+    if re.fullmatch(r"(?:lies|lese)\s+(?:diese|die)\s+datei[.!?]?", lowered):
+        return "Welche Datei soll ich lesen?"
+
+    # A question *about* reminders is not an instruction to create one.
+    if not looks_like_tool_request(lowered):
+        return None
+    if re.search(
+        r"\b(?:zeige|liste|suche|finde|offene)\s+(?:mir\s+)?erinnerungen\b", lowered
+    ):
         return None
 
-    has_time_hint = (
-        re.search(r"\b\d{1,2}(?::|\.)?\d{0,2}\s*uhr\b", lowered) is not None
-        or re.search(r"\b\d{1,2}\.\d{1,2}(?:\.\d{2,4})?\b", lowered) is not None
-        or any(word in lowered for word in ("heute", "morgen", "uebermorgen", "übermorgen", *WEEKDAY_HINTS))
+    reminder_action = re.search(
+        r"\b(?:erinner(?:e)?\s+mich|remind me)\b", lowered
+    ) or (
+        re.search(r"\b(?:erinnerung|reminder)\b", lowered)
+        and re.search(r"\b(?:mach|erstell(?:e)?|setze|lege)\b", lowered)
     )
-    has_quote_content = re.search(r"\"[^\"]+\"|'[^']+'", normalized) is not None
-    has_content_hint = has_quote_content or any(
-        hint in lowered
-        for hint in (
-            "dass",
-            "lautet",
-            "sagt",
-            "heisst",
-            "heißt",
-            "inhalt",
-            "text",
-            "an ",
-            "ans ",
-            "daran",
+    if reminder_action:
+        has_time = (
+            re.search(r"\b\d{1,2}(?::|\.)?\d{0,2}\s*uhr\b", lowered) is not None
+            or re.search(r"\b\d{1,2}\.\d{1,2}(?:\.\d{2,4})?\b", lowered) is not None
+            or re.search(
+                r"\b(?:heute|morgen|uebermorgen|übermorgen|"
+                + "|".join(WEEKDAY_HINTS) + r")\b", lowered
+            ) is not None
         )
-    )
+        has_content = (
+            re.search(r"\"[^\"]+\"|'[^']+'", normalized) is not None
+            or re.search(
+                r"\b(?:an|ans|daran|dass|lautet|sagt|inhalt|text)\b", lowered
+            ) is not None
+        )
+        if not has_content:
+            return "Was soll in der Erinnerung stehen?" if not has_time else "Woran soll ich dich erinnern?"
+        if not has_time:
+            return "Wann soll ich dich daran erinnern?"
 
-    if any(word in lowered for word in ("erinnerung", "erinner mich", "remind me")):
-        if not has_time_hint and not has_content_hint:
-            return (
-                "Damit ich die Erinnerung sauber anlege, brauche ich Zeitpunkt und Inhalt. "
-                "Beispiel: `Jarvis, erinnere mich morgen um 10 Uhr daran, Licht auszumachen.`"
-            )
-        if not has_time_hint:
-            return "Für die Erinnerung fehlt noch der Zeitpunkt. Wann genau soll ich sie setzen, Sir?"
-        if not has_content_hint and len(lowered.split()) <= 12:
-            return "Für die Erinnerung fehlt noch der genaue Inhalt. Was soll der Reminder sagen, Sir?"
-
-    if any(hint in lowered for hint in CALENDAR_HINTS):
-        has_calendar_verb = any(word in lowered for word in ("plane", "plan", "eintragen", "trag", "schedule"))
-        if has_calendar_verb and not has_time_hint:
-            return "Ich kann den Termin sofort eintragen. Nennen Sie bitte Startzeit und optional Dauer."
+    if re.search(r"\b(?:plane|plan|trag|eintragen|schedule)\b", lowered) and re.search(
+        r"\b(?:kalender|termin|event|eintrag)\b", lowered
+    ):
+        has_time = re.search(
+            r"\b(?:heute|morgen|uebermorgen|übermorgen|"
+            + "|".join(WEEKDAY_HINTS) + r"|\d{1,2}\s*uhr)\b", lowered
+        )
+        if not has_time:
+            return "Wann soll der Termin beginnen?"
 
     return None

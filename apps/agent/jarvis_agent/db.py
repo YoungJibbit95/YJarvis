@@ -628,7 +628,7 @@ class Database:
                 return 0
             return int(row["total"])
 
-    async def search_memory(self, query: str, limit: int = 4) -> list[dict[str, Any]]:
+    async def search_memory(self, query: str, limit: int = 4, *, session_id: str | None = None) -> list[dict[str, Any]]:
         normalized_query = " ".join(
             token.strip()
             for token in query.replace("\n", " ").split(" ")
@@ -644,10 +644,11 @@ class Database:
                     FROM memory_items_fts
                     JOIN memory_items m ON m.id = memory_items_fts.rowid
                     WHERE memory_items_fts MATCH ?
+                      AND (? IS NULL OR m.session_id = ?)
                     ORDER BY rank ASC
                     LIMIT ?
                     """,
-                    (normalized_query, limit),
+                    (normalized_query, session_id, session_id, limit),
                 )
             else:
                 rows = await self._fetchall(
@@ -655,10 +656,11 @@ class Database:
                     """
                     SELECT id, content, importance, created_at, 0.0 AS rank
                     FROM memory_items
+                    WHERE (? IS NULL OR session_id = ?)
                     ORDER BY created_at DESC
                     LIMIT ?
                     """,
-                    (limit,),
+                    (session_id, session_id, limit),
                 )
 
             return [dict(row) for row in rows]
