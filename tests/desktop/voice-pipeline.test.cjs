@@ -3,6 +3,7 @@ const { test } = require("node:test");
 const React = require("react");
 const { load } = require("./load-setup.cjs");
 const voice = load("../voice/voiceReliability.ts");
+const microphone = load("../voice/microphoneDevices.ts");
 
 function nodes(node) {
   if (!node || typeof node !== "object") return [];
@@ -117,7 +118,9 @@ async function makeHarness(overrides = {}) {
     "./app/PresenceStage": { PresenceStage: () => null, runStateLabel: () => "event" },
     "./app/ActionReview": { ActionReview: () => null },
     "./setup/SetupStatusView": { SetupNotice: () => null },
-    "./setup/GuidedInstaller": { GuidedInstaller: () => null }
+    "./setup/GuidedInstaller": { GuidedInstaller: () => null },
+    "./components/IntelligentSettings": { IntelligentSettings: () => null },
+    "./voice/microphoneDevices": microphone
   }, {
     Date: Clock, Blob, Error, MediaRecorder: Recorder, WebSocket: Socket,
     Math: Object.assign(Object.create(Math), { random: () => 0.42 }),

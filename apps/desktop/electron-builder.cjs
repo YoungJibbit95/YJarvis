@@ -26,5 +26,11 @@ module.exports = {
     runAfterFinish: false,
     artifactName: "YJarvis-${version}-windows-${arch}-setup.${ext}"
   },
-  mac: { target: ["dmg"], category: "public.app-category.productivity" }
+  mac: {
+    target: ["dmg"],
+    category: "public.app-category.productivity",
+    extendInfo: {
+      NSMicrophoneUsageDescription: "YJarvis verwendet das Mikrofon nur, wenn du Sprachmodus oder einen Mikrofontest startest."
+    }
+  }
 };

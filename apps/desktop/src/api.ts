@@ -5,6 +5,7 @@ import { parseModelCatalog, type ModelCatalogEntry } from "./setup/modelCatalog"
 import { parseHardwareProfile, type HardwareProfile } from "./setup/hardwareProfile";
 import { parseAcceleratorProfile, type AcceleratorProfile } from "./setup/acceleratorProfile";
 import { parseInstallOptions, parseInstallState, type InstallSelection } from "./setup/installTypes";
+import { parseModelInventory, type ModelInventory } from "./setup/modelInventory";
 
 const AGENT_HOST = import.meta.env.VITE_JARVIS_AGENT_HOST || "127.0.0.1";
 const AGENT_PORT = import.meta.env.VITE_JARVIS_AGENT_PORT || "8787";
@@ -107,6 +108,14 @@ export async function fetchSetupStatus(signal: AbortSignal): Promise<SetupStatus
   const response = await fetch(`${API_BASE}/v1/setup/status`, { cache: "no-store", signal });
   if (!response.ok) throw new Error("Setup inspection failed");
   return parseSetupStatus(await response.json());
+}
+
+export async function fetchModelInventory(signal?: AbortSignal): Promise<ModelInventory> {
+  const response = await fetch(`${API_BASE}/v1/setup/inventory`, {
+    cache: "no-store", signal
+  });
+  if (!response.ok) throw new Error(await readErrorDetails(response, "Modellinventar nicht erreichbar"));
+  return parseModelInventory(await response.json());
 }
 
 export async function fetchModelCatalog(signal: AbortSignal): Promise<ModelCatalogEntry[]> {

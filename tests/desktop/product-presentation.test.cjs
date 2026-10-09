@@ -134,7 +134,9 @@ async function appHarness(apiOverrides = {}) {
     "./app/AppFeedback": { AppFeedback }, "./app/PresenceStage": { PresenceStage, runStateLabel },
     "./app/ActionReview": { ActionReview }, "./voice/voiceReliability": load("../voice/voiceReliability.ts"),
     "./setup/SetupStatusView": { SetupNotice },
-    "./setup/GuidedInstaller": { GuidedInstaller: () => null }
+    "./setup/GuidedInstaller": { GuidedInstaller: () => null },
+    "./components/IntelligentSettings": { IntelligentSettings: () => null },
+    "./voice/microphoneDevices": load("../voice/microphoneDevices.ts")
   }, {
     Error, WebSocket: Socket,
     navigator: { mediaDevices: { getUserMedia: async () => { throw new Error("Microphone denied"); } } },

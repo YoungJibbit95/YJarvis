@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("jarvisDesktop", {
   platform: process.platform,
+  microphoneStatus: () => ipcRenderer.invoke("jarvis:microphone-permission-status"),
   windowControls: {
     close: () => ipcRenderer.send("jarvis:window-control", "close"),
     minimize: () => ipcRenderer.send("jarvis:window-control", "minimize"),
