@@ -1,24 +1,46 @@
-node_modules
-.DS_Store
+
+# Dependencies
+node_modules/
+.venv/
+.setup-tools/
+
+# Environment variables
 .env
 .env.*
 !.env.example
-.venv
-.setup-tools/
-runtime/*.db
-runtime/*.log
-runtime/audio/
-runtime/tts/
-runtime/models/
-apps/desktop/dist
-apps/desktop/.vite
-__pycache__
-*.pyc
-.pytest_cache
-.ruff_cache
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
 *.egg-info/
+.pytest_cache/
+.ruff_cache/
 .coverage
 htmlcov/
+
+# Build artifacts
 /build/
+/dist/
 /release/
-runtime/*.db-*
+/apps/desktop/build/
+/apps/desktop/dist/
+/apps/desktop/release/
+/apps/desktop/.vite/
+
+# Runtime data
+/runtime/*.db
+/runtime/*.db-*
+/runtime/*.log
+/runtime/audio/
+/runtime/tts/
+/runtime/models/
+
+# Electron Builder
+*.dmg
+*.dmg.blockmap
+*.zip.blockmap
+builder-debug.yml
+builder-effective-config.yaml

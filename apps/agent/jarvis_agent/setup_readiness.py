@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import BaseModel
 
+from .native_tools import find_whisper_binary
+
 
 class ComponentStatus(BaseModel):
     status: Literal["available", "missing", "unreachable", "unknown", "error"]
@@ -98,8 +100,10 @@ def combine_status(chat_model: ComponentStatus, stt: ComponentStatus, tts: Compo
 
 
 async def inspect_setup(settings: dict[str, Any], default_whisper_model: Path) -> SetupStatus:
-    # Same configured-path/default-path selection as the existing STT runtime.
+    # Match the model and native CLI that the STT runtime will actually use.
     stt = inspect_model_file(str(settings.get("whisper_model_path", "") or default_whisper_model))
+    if stt.status == "available" and not find_whisper_binary(str(settings.get("whisper_binary", "auto"))):
+        stt = ComponentStatus(status="missing", reason="whisper_cli_missing")
     tts = ComponentStatus(status="unknown", reason="voice_unverified")
     if str(settings.get("tts_engine", "piper")).strip().lower() == "piper":
         asset = inspect_model_file(str(settings.get("tts_model_path", "")).strip())

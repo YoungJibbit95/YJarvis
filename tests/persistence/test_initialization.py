@@ -1,7 +1,9 @@
 import sqlite3
 from datetime import datetime
 
-from jarvis_agent.persistence import migrate_database
+import pytest
+
+from jarvis_agent.persistence import MigrationError, migrate_database
 from jarvis_agent.persistence.schema import schema_signature
 
 
@@ -44,6 +46,42 @@ def test_legacy_adoption_preserves_every_raw_row_and_fts_shadow_row(legacy_db, s
     adopted = snapshot(legacy_db, include_metadata=True)
     assert migrate_database(legacy_db) == ()
     assert snapshot(legacy_db, include_metadata=True) == adopted
+
+
+def test_legacy_adoption_preserves_recognized_perf_metrics_extension(tmp_path, make_legacy, snapshot):
+    path = make_legacy(tmp_path / "legacy-with-perf.db")
+    with sqlite3.connect(path) as connection:
+        connection.execute("""CREATE TABLE run_perf_metrics (
+            run_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            intent_decision_ms INTEGER,
+            prompt_build_ms INTEGER,
+            ttft_ms INTEGER,
+            tool_exec_ms INTEGER,
+            run_total_ms INTEGER,
+            approval_wait_ms INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""")
+        connection.executemany(
+            "INSERT INTO run_perf_metrics VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(f"run-{index}", "legacy-session", 1, 2, 3, 4, 5, 6, "created", "updated")
+             for index in range(5)],
+        )
+    before = snapshot(path)
+    assert migrate_database(path) == (1,)
+    assert snapshot(path) == before
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM run_perf_metrics").fetchone() == (5,)
+        assert connection.execute("SELECT version FROM schema_migrations").fetchall() == [(1,)]
+
+
+def test_legacy_perf_metrics_extension_must_match_known_schema(tmp_path, make_legacy):
+    path = make_legacy(tmp_path / "legacy-with-unknown-perf.db")
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE run_perf_metrics (run_id TEXT PRIMARY KEY, payload TEXT)")
+    with pytest.raises(MigrationError, match="run_perf_metrics"):
+        migrate_database(path)
 
 
 def test_fts_insert_update_and_delete_triggers_still_work(legacy_db):

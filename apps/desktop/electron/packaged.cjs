@@ -12,9 +12,9 @@ async function checkBackendPort(port = 8787) {
   });
 }
 
-function packagedBackendOptions(resourcesPath, userData, env = process.env) {
+function packagedBackendOptions(resourcesPath, userData, env = process.env, platform = process.platform) {
   return {
-    command: path.join(resourcesPath, "agent", "jarvis-agent.exe"),
+    command: path.join(resourcesPath, "agent", platform === "win32" ? "jarvis-agent.exe" : "jarvis-agent"),
     args: [],
     cwd: userData,
     env: {

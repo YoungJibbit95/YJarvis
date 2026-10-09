@@ -5,7 +5,7 @@ import asyncio
 import json
 import os
 import re
-import shutil
+import signal
 import subprocess
 import sys
 import wave
@@ -15,6 +15,7 @@ from uuid import uuid4
 import httpx
 
 from .setup_downloads import download, extract_archive, repository_file, source_json
+from .native_tools import find_system_tool, find_whisper_binary
 
 
 WHISPER_MODELS = ("tiny", "base", "small", "medium", "large-v3", "large-v3-turbo")
@@ -78,7 +79,7 @@ async def install_voice(client, runtime: Path, key: str, progress) -> dict:
 
 
 def existing_tool(name: str, runtime: Path) -> str | None:
-    command = shutil.which(name)
+    command = find_whisper_binary() if name in {"whisper-cli", "whisper-cpp"} else find_system_tool(name)
     if command:
         return command
     if name == "ollama" and sys.platform == "win32":
@@ -115,9 +116,50 @@ def restore_tools(runtime: Path) -> None:
         bundle = Path(sys._MEIPASS)
         directories = {str(bundle), *(str(file.parent) for file in bundle.rglob("msvcp140.dll"))}
         os.environ["PATH"] = os.pathsep.join(sorted(directories)) + os.pathsep + os.environ.get("PATH", "")
-    ffmpeg = existing_tool("ffmpeg", runtime)
-    if ffmpeg:
-        os.environ["PATH"] = str(Path(ffmpeg).parent) + os.pathsep + os.environ.get("PATH", "")
+    for name in ("ffmpeg", "whisper-cli"):
+        command = existing_tool(name, runtime)
+        if command:
+            os.environ["PATH"] = str(Path(command).parent) + os.pathsep + os.environ.get("PATH", "")
+
+
+async def _install_macos_tool(name: str, progress) -> str:
+    formula = {"whisper-cli": "whisper.cpp", "ffmpeg": "ffmpeg"}.get(name)
+    if not formula:
+        raise ValueError(f"{name} kann auf macOS nicht automatisch installiert werden")
+    brew = find_system_tool("brew")
+    if not brew:
+        raise ValueError("Homebrew fehlt. Bitte Homebrew installieren und danach die Whisper-Einrichtung erneut starten.")
+    progress(0, None)
+    process = await asyncio.create_subprocess_exec(
+        brew, "install", formula,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        _, stderr = await asyncio.wait_for(process.communicate(), timeout=1800)
+    except asyncio.TimeoutError as error:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        await process.wait()
+        raise ValueError(f"Homebrew-Installation von {formula} hat das Zeitlimit überschritten") from error
+    except asyncio.CancelledError:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        await process.wait()
+        raise
+    if process.returncode != 0:
+        detail = stderr.decode("utf-8", errors="replace").strip().splitlines()
+        suffix = f": {detail[-1][:180]}" if detail else ""
+        raise ValueError(f"Homebrew konnte {formula} nicht installieren{suffix}")
+    executable = find_whisper_binary() if name == "whisper-cli" else find_system_tool(name)
+    if not executable:
+        raise ValueError(f"Homebrew meldet {formula} installiert, aber das Programm wurde nicht gefunden")
+    return executable
 
 
 async def install_tool(client, runtime: Path, name: str, progress) -> str:
@@ -133,6 +175,8 @@ async def install_tool(client, runtime: Path, name: str, progress) -> str:
                 if probe.returncode is None:
                     probe.kill(); await probe.wait()
         return existing
+    if sys.platform == "darwin":
+        return await _install_macos_tool(name, progress)
     if sys.platform != "win32":
         raise ValueError(f"{name} fehlt. Auf dieser Plattform bitte über den System-Paketmanager installieren.")
     recipes = {

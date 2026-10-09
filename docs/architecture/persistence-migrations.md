@@ -91,9 +91,12 @@ this structural comparison; their existing contents are not rewritten.
 
 Tokenization ignores SQL formatting/comments and unquoted keyword case, but
 preserves quoted text, literal whitespace and identifiers. It is a conservative
-known-schema recognizer, **not a general SQL-equivalence engine**. Extra custom
-indexes/tables/views/triggers and otherwise equivalent but differently quoted
-schema variants require manual review rather than automatic acceptance.
+known-schema recognizer, **not a general SQL-equivalence engine**. The sole
+recognized additive legacy extension is the exact `run_perf_metrics` table
+schema; its rows are retained unchanged during adoption. Any other extra
+custom indexes/tables/views/triggers and otherwise
+equivalent but differently quoted schema variants require manual review rather
+than automatic acceptance.
 
 Recognition is followed by `PRAGMA integrity_check`, `PRAGMA foreign_key_check`
 and FTS5's external-content integrity check. A matching schema with orphan rows
