@@ -15,6 +15,26 @@ METADATA_SQL = """CREATE TABLE schema_migrations (
 METADATA_KEY = ("table", "schema_migrations")
 SchemaSignature = dict[tuple[str, str], tuple[str, tuple[str, ...]]]
 
+# Some legacy runtimes persisted this additive table outside the frozen V1
+# baseline. Recognize only its exact schema so adoption preserves its rows
+# without accepting arbitrary extra database objects.
+LEGACY_PERF_METRICS_KEY = ("table", "run_perf_metrics")
+LEGACY_PERF_METRICS_SIGNATURE = (
+    "run_perf_metrics",
+    sql_tokens("""CREATE TABLE run_perf_metrics (
+        run_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        intent_decision_ms INTEGER,
+        prompt_build_ms INTEGER,
+        ttft_ms INTEGER,
+        tool_exec_ms INTEGER,
+        run_total_ms INTEGER,
+        approval_wait_ms INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )"""),
+)
+
 
 def schema_signature(connection: sqlite3.Connection) -> SchemaSignature:
     rows = connection.execute(
@@ -26,7 +46,10 @@ def schema_signature(connection: sqlite3.Connection) -> SchemaSignature:
 
 def require_schema(actual: SchemaSignature, expected: SchemaSignature) -> None:
     missing = sorted(key[1] for key in expected.keys() - actual.keys())
-    extra = sorted(key[1] for key in actual.keys() - expected.keys())
+    extra = sorted(
+        key[1] for key in actual.keys() - expected.keys()
+        if key != LEGACY_PERF_METRICS_KEY or actual[key] != LEGACY_PERF_METRICS_SIGNATURE
+    )
     changed = sorted(key[1] for key in expected.keys() & actual.keys() if actual[key] != expected[key])
     if missing or extra or changed:
         raise MigrationError(

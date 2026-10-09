@@ -442,6 +442,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
 
   const [voiceModeEnabled, setVoiceModeEnabled] = useState(false);
   const [voiceRepliesEnabled, setVoiceRepliesEnabled] = useState(true);
+  const [voiceTranscriptPreview, setVoiceTranscriptPreview] = useState("");
   const [assistantMode, setAssistantMode] = useState<AssistantMode>("idle");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
@@ -893,9 +894,11 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       const result = await transcribe(blob);
       const text = result.text.trim();
       if (!text) {
+        setVoiceTranscriptPreview("");
         setStatus("Keine Sprache erkannt.");
         return;
       }
+      setVoiceTranscriptPreview(text);
 
       if (isVoiceInputSuppressed()) {
         setStatus("Audioeingabe waehrend eigener Sprachausgabe ignoriert.");
@@ -930,6 +933,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
 
       setStatus(`Erkannt (${result.latency_ms} ms): ${wakeCommand}`);
       enqueueVoiceMessage(wakeCommand);
+      setVoiceTranscriptPreview("");
     } catch (error) {
       reportFailure("voice", "Spracherkennung fehlgeschlagen", error);
     }
@@ -966,6 +970,9 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       recorderOptions.mimeType = mimeType;
     }
     const recorder = new MediaRecorder(stream, recorderOptions);
+    let partialTimer: number | null = null;
+    let partialTranscription: Promise<void> = Promise.resolve();
+    let partialInFlight = false;
 
     mediaChunksRef.current = [];
     segmentStartAtRef.current = Date.now();
@@ -981,6 +988,10 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     };
 
     recorder.onstop = () => {
+      if (partialTimer !== null) {
+        window.clearInterval(partialTimer);
+        partialTimer = null;
+      }
       const blob = new Blob(mediaChunksRef.current, {
         type: recorder.mimeType || "audio/webm"
       });
@@ -989,7 +1000,12 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
 
       const hadSpeech = speechDetectedInSegmentRef.current;
       if (hadSpeech && !isVoiceInputSuppressed()) {
-        void handleRecordedSegment(blob);
+        void (async () => {
+          await partialTranscription;
+          await handleRecordedSegment(blob);
+        })();
+      } else {
+        setVoiceTranscriptPreview("");
       }
 
       if (voiceModeEnabledRef.current && mediaStreamRef.current) {
@@ -997,8 +1013,30 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       }
     };
 
-    recorder.start();
+    recorder.start(1000);
     mediaRecorderRef.current = recorder;
+    partialTimer = window.setInterval(() => {
+      if (partialInFlight || !speechDetectedInSegmentRef.current || mediaChunksRef.current.length === 0) {
+        return;
+      }
+      const snapshot = new Blob([...mediaChunksRef.current], {
+        type: recorder.mimeType || "audio/webm"
+      });
+      if (snapshot.size === 0) return;
+      partialInFlight = true;
+      partialTranscription = transcribe(snapshot)
+        .then((result) => {
+          if (voiceModeEnabledRef.current && result.text.trim()) {
+            setVoiceTranscriptPreview(result.text.trim());
+          }
+        })
+        .catch(() => {
+          // Partial recognition is best effort; the final segment reports errors.
+        })
+        .finally(() => {
+          partialInFlight = false;
+        });
+    }, 2500);
   }
 
   function startVoiceMonitor() {
@@ -1107,6 +1145,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       const analyser = context.createAnalyser();
       analyser.fftSize = 2048;
       source.connect(analyser);
+      await context.resume();
 
       audioContextRef.current = context;
       sourceNodeRef.current = source;
@@ -1622,6 +1661,11 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
                 ))}
               </div>
               <small>Sprich Jarvis im Sprachmodus mit „Jarvis …“ an.</small>
+              {voiceModeEnabled ? (
+                <small className="voice-transcript-preview" aria-live="polite">
+                  {voiceTranscriptPreview || "Ich höre zu … der erkannte Text erscheint hier."}
+                </small>
+              ) : null}
             </div>
 
             <textarea

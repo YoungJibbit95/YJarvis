@@ -14,6 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from .config import AppConfig
+from .native_tools import find_system_tool, find_whisper_binary
 
 try:
     from piper import PiperVoice, SynthesisConfig
@@ -112,18 +113,11 @@ _PIPER_CMD_MODE_CACHE_LOCK = threading.Lock()
 
 
 def _find_whisper_binary(configured_binary: str) -> str | None:
-    if configured_binary and configured_binary != "auto":
-        return configured_binary
-
-    for candidate in ["whisper-cli", "whisper-cpp"]:
-        resolved = shutil.which(candidate)
-        if resolved:
-            return resolved
-    return None
+    return find_whisper_binary(configured_binary)
 
 
 def _find_ffmpeg_binary() -> str | None:
-    return shutil.which("ffmpeg")
+    return find_system_tool("ffmpeg")
 
 
 def _find_piper_binary() -> str | None:

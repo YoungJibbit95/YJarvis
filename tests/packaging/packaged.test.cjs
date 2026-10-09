@@ -9,7 +9,9 @@ test("installed backend uses bundled executable and writable data; preserves exp
   const data = path.join(os.tmpdir(), "YJarvis data");
   const resources = path.join(os.tmpdir(), "Program Files", "resources");
   const options = packagedBackendOptions(resources, data, { JARVIS_AGENT_HOST: "remote", JARVIS_AGENT_PORT: "99", JARVIS_DB_PATH: "custom.db" });
-  assert.equal(options.command, path.join(resources, "agent", "jarvis-agent.exe"));
+  assert.equal(options.command, path.join(resources, "agent", process.platform === "win32" ? "jarvis-agent.exe" : "jarvis-agent"));
+  assert.equal(packagedBackendOptions(resources, data, {}, "win32").command, path.join(resources, "agent", "jarvis-agent.exe"));
+  assert.equal(packagedBackendOptions(resources, data, {}, "darwin").command, path.join(resources, "agent", "jarvis-agent"));
   assert.deepEqual(options.args, []);
   assert.equal(options.cwd, data);
   assert.equal(options.env.JARVIS_PROJECT_ROOT, data);

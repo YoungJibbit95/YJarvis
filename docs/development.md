@@ -275,6 +275,14 @@ syntax checks, not full TypeScript checking. `npm run build` is the existing Vit
 renderer build producing `apps/desktop/dist`; it does not package/sign a macOS
 application or launch Electron.
 
+On native macOS, `npm run dist:mac` builds the PyInstaller backend and packages
+the Electron app and backend into `release/mac-arm64/YJarvis.app` (Apple Silicon)
+or `release/mac-x64/YJarvis.app` (Intel), plus a DMG under `release/`. It requires
+the project virtual environment with Python 3.11 and both agent and packaging
+dependencies installed. The build signs with an available local Apple identity;
+notarization is not configured, and a successful package build does not replace
+an interactive install/launch check.
+
 ## 6. CI and review evidence
 
 `.github/workflows/ci.yml` retains four Ubuntu jobs: `python-tests`, `python-lint`,

@@ -82,9 +82,11 @@ spaces), installed EXE/backend/ASAR hashes, installed backend startup, and silen
 uninstallation. The installer smoke refuses to replace an existing YJarvis
 installation. CI uploads only the setup EXE as an artifact; it does not publish a release.
 
-Interactive install/launch/update/uninstall, SmartScreen, Ollama generation,
-microphone and audio behavior require manual smoke checks. macOS packaging is
-not introduced or claimed tested. Existing development startup stays available.
+Interactive Windows install/launch/update/uninstall, SmartScreen, Ollama generation,
+microphone and audio behavior require manual smoke checks. A native macOS package
+build is documented separately in `docs/development.md`; it does not claim
+notarization or an interactive install check. Existing development startup stays
+available.
 
 Build-only dependencies: electron-builder 26.15.3, PyInstaller 6.22.3. Their
 transitive graph follows the npm lockfile and Python packaging requirements;
