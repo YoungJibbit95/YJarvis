@@ -40,7 +40,10 @@ def _extract_json_blob(text: str) -> str | None:
     end = candidate.rfind("}")
     if start == -1 or end == -1 or end <= start:
         return None
-    re@dataclass(frozen=True)
+    return candidate[start : end + 1]
+
+
+@dataclass(frozen=True)
 class ModelToolCall:
     """Only a proposal; the exact read-only dispatcher must validate it."""
 
@@ -166,7 +169,6 @@ async def stream_chat(
         yield _single_model_tool_call(tool_chunks)
 
 
-or(base_url, error)) from error
 
 
 async def complete_chat(
