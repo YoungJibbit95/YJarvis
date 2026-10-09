@@ -149,8 +149,9 @@ class ReadOnlyToolkit:
         }
 
     def capability_snapshot(self, *, settings: dict[str, Any]) -> dict[str, Any]:
-        from .domain.capability_catalog import CAPABILITY_CATALOG, LEGACY_TOOL_TO_CAPABILITY
-
+        # The V2 domain catalog and provider registry intentionally cannot be
+        # imported into the active legacy runtime (domain-isolation contract).
+        # Registered legacy tool instances remain the only executable evidence.
         legacy: list[dict[str, Any]] = []
         if self._tools is not None:
             for spec in self._tools.list_specs():
@@ -158,7 +159,6 @@ class ReadOnlyToolkit:
                 availability = self._legacy_runtime_status(name, settings)
                 legacy.append({
                     "name": name,
-                    "semantic_name": LEGACY_TOOL_TO_CAPABILITY.get(name),
                     "registered": True,
                     **availability,
                     "risk": spec["risk_level"],
@@ -169,7 +169,9 @@ class ReadOnlyToolkit:
 
         # No CapabilityProviderRegistry instance is wired to this production
         # TurnEngine. Specs in CAPABILITY_CATALOG are known, NOT executable.
-        known_v2 = sorted(CAPABILITY_CATALOG)
+        # No production V2 ToolRuntime or provider registry is wired, so the
+        # independent V2 catalog is NOT enumerated as live capability data.
+        known_v2: list[str] = []
         runtime = [
             {
                 "name": name,
@@ -190,7 +192,11 @@ class ReadOnlyToolkit:
                 "known_capabilities": known_v2,
                 "provider_wired_to_current_agent": False,
                 "available_for_execution": [],
-                "note": "Catalog definitions do not imply provider registration or runtime wiring",
+                "catalog_enumerated": False,
+                "note": (
+                    "Separate V2 specification catalog exists but is not imported "
+                    "into legacy runtime or wired for execution"
+                ),
             },
             "discovery_does_not_grant_approval": True,
             "note": "Availability is platform/backend readiness, not target app or permission verification",

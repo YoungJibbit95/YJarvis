@@ -50,8 +50,8 @@ def test_followup_uses_actual_session_history_and_one_model_call(rig):
     rig.set_stream(["Daraus folgt eine Erklärung."])
 
     async def scenario():
-        await rig.db.add_message("session", "user", "Sprechen wir über das Projekt.")
-        await rig.db.add_message("session", "assistant", "Wir müssen den Fehler beheben.")
+        await rig.db.add_message(session_id="session", role="user", content="Sprechen wir über das Projekt.")
+        await rig.db.add_message(session_id="session", role="assistant", content="Wir müssen den Fehler beheben.")
         await rig.service.start_run("session", "run", "Warum?")
         messages = rig.stream.call_args.kwargs["messages"]
         assert messages[-3:] == [

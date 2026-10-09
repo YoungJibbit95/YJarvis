@@ -92,7 +92,9 @@ def test_capability_snapshot_distinguishes_actual_registry_and_unknown_platform(
     assert notes["registered"] and not notes["available"]
     assert files["platform_supported"] and not files["available"]
     assert apps["requires_approval"] and not apps["approved"]
-    assert snap["v2_catalog"]["known_capabilities"] == sorted(CAPABILITY_CATALOG)
+    assert snap["v2_catalog"]["known_capabilities"] == []
+    assert not snap["v2_catalog"]["catalog_enumerated"]
+    assert "notes.search" in CAPABILITY_CATALOG  # independently known, not live
     assert snap["v2_catalog"]["available_for_execution"] == []
     assert not snap["v2_catalog"]["provider_wired_to_current_agent"]
     assert {x["name"] for x in snap["read_only_runtime"]} == {LOCAL_TIME_TOOL, DISCOVERY_TOOL}
@@ -111,7 +113,8 @@ def test_snapshot_uses_runtime_and_actual_command_availability_not_catalog_promi
     assert registered["reminder_list"]["available"]
     assert registered["file_read"]["available"]
     assert registered["file_read"]["requires_approval"]
-    assert "notes.search" in data["v2_catalog"]["known_capabilities"]
+    assert "notes.search" in CAPABILITY_CATALOG
+    assert "notes.search" not in data["v2_catalog"]["available_for_execution"]
     assert data["v2_catalog"]["available_for_execution"] == []
     unavailable = ReadOnlyToolkit(
         ToolRegistry(), platform_name="darwin", command_exists=lambda command: None,
