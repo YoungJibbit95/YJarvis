@@ -33,6 +33,13 @@ import { ActionReview } from "./app/ActionReview";
 import { SetupNotice } from "./setup/SetupStatusView";
 import type { SetupCheck } from "./setup/types";
 import { GuidedInstaller } from "./setup/GuidedInstaller";
+import { ChatSubmissionError } from "./api";
+import {
+  OrderedSegmentProcessor,
+  VoiceSubmissionQueue,
+  WakeCommandWindow,
+  type VoiceSubmission
+} from "./voice/voiceReliability";
 
 type AssistantMode = "idle" | "thinking" | "speaking";
 
@@ -52,6 +59,27 @@ type TimelineEntry = {
   detail?: string;
   timestamp: string;
 };
+
+type CaptureStopReason = "silence" | "max" | "manual" | "tts" | "cancel";
+type RecordedCapture = {
+  id: number;
+  recorder: MediaRecorder;
+  chunks: Blob[];
+  startedAt: number;
+  speechStartedAt: number | null;
+  hadSpeech: boolean;
+  stopReason: CaptureStopReason | null;
+  finalized: boolean;
+};
+
+function whisperSetupHint(reason: string): string {
+  if (reason === "whisper_cli_missing") return "Whisper CLI fehlt. Bitte im Guided Setup installieren.";
+  if (reason === "ffmpeg_missing") return "ffmpeg fehlt. Bitte im Guided Setup installieren.";
+  if (reason === "model_file_missing" || reason === "model_file_invalid") {
+    return "Whisper-Modell fehlt oder ist ungültig. Bitte im Guided Setup auswählen.";
+  }
+  return "Spracherkennung nicht bereit (" + reason + "). Bitte Guided Setup prüfen.";
+}
 
 const DEFAULT_SETTINGS: JarvisSettings = {
   model_name: "qwen2.5:3b-instruct",
@@ -102,7 +130,6 @@ const NORMALIZED_TRANSCRIPT_ARTIFACT_PATTERNS = TRANSCRIPT_ARTIFACT_PATTERNS
   .map((pattern) => normalizeForEchoCheck(pattern))
   .filter(Boolean);
 const SHORT_STATION_YEAR_ARTIFACT_REGEX = /^(?:swr|ard|zdf|rtl|orf)\s+\d{2,4}$/i;
-const WAKE_WORD_PREFIX_REGEX = /^(?:(?:hey|hallo|ok|okay)\s+)?jarvis\b[\s,.:;\-]*(.*)$/i;
 const SPEECH_BOUNDARY_REGEX = /(?:[.!?](?:\s+|$))|(?:[:;](?:\s+|$))|(?:\n+)/g;
 const QUICK_ACTIONS: Array<{ label: string; prompt: string }> = [
   {
@@ -202,20 +229,6 @@ function fileNameFromPath(value: string): string {
   const normalized = trimmed.replace(/\\/g, "/");
   const parts = normalized.split("/");
   return parts[parts.length - 1] || trimmed;
-}
-
-function extractWakeWordCommand(text: string): string | null {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const match = trimmed.match(WAKE_WORD_PREFIX_REGEX);
-  if (!match) {
-    return null;
-  }
-
-  return (match[1] || "").trim();
 }
 
 function normalizeSpeechChunk(text: string): string {
@@ -404,6 +417,7 @@ const CommandPalette = memo(function CommandPalette({
 
 function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheckSetup: () => Promise<void> }) {
   const chatAvailable = setupCheck.state === "ready" || setupCheck.state === "degraded";
+  const sttUnavailable = !!setupCheck.report && setupCheck.report.stt.status !== "available";
   const chatAvailableRef = useRef(chatAvailable);
   chatAvailableRef.current = chatAvailable;
   const [activeTab, setActiveTab] = useState<TabId>("chat");
@@ -443,6 +457,8 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
   const [voiceModeEnabled, setVoiceModeEnabled] = useState(false);
   const [voiceRepliesEnabled, setVoiceRepliesEnabled] = useState(true);
   const [voiceTranscriptPreview, setVoiceTranscriptPreview] = useState("");
+  const [voiceStage, setVoiceStage] = useState("");
+  const [voiceEntries, setVoiceEntries] = useState<VoiceSubmission[]>([]);
   const [assistantMode, setAssistantMode] = useState<AssistantMode>("idle");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
@@ -454,8 +470,10 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
   const suppressVoiceInputUntilRef = useRef(0);
   const lastAssistantSpokenTextRef = useRef("");
 
-  const voiceQueueRef = useRef<string[]>([]);
+  const voiceQueueRef = useRef(new VoiceSubmissionQueue());
   const voiceFlushRunningRef = useRef(false);
+  const wakeWindowRef = useRef(new WakeCommandWindow());
+  const segmentOrderRef = useRef(new OrderedSegmentProcessor());
   const ttsQueueRef = useRef<string[]>([]);
   const ttsQueueRunningRef = useRef(false);
   const spokenOffsetByRunRef = useRef<Record<string, number>>({});
@@ -464,7 +482,11 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
   const voiceModeEnabledRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const mediaChunksRef = useRef<Blob[]>([]);
+  const activeCaptureRef = useRef<RecordedCapture | null>(null);
+  const captureCounterRef = useRef(0);
+  const voiceStartInProgressRef = useRef(false);
+  const voiceStartGenerationRef = useRef(0);
+  const voiceDisposedRef = useRef(false);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -473,9 +495,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
   const monitorRafRef = useRef<number | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const segmentStartAtRef = useRef(0);
   const lastSpeechAtRef = useRef(0);
-  const speechDetectedInSegmentRef = useRef(false);
   const silenceFrameCountRef = useRef(0);
   const voiceGateOpenRef = useRef(false);
   const busyWatchdogTimerRef = useRef<number | null>(null);
@@ -582,13 +602,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     syncAssistantMode();
     suppressVoiceInputFor(TTS_INPUT_SUPPRESSION_PREPLAY_MS);
 
-    if (voiceModeEnabledRef.current && mediaRecorderRef.current?.state === "recording") {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch {
-        // ignore
-      }
-    }
+    if (voiceModeEnabledRef.current) requestRecorderStop("tts");
 
     try {
       lastAssistantSpokenTextRef.current = nextChunk;
@@ -783,27 +797,36 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     }
   }
 
-  function stopVoiceModeInternal({ updateStatus }: { updateStatus: boolean }) {
+  function requestRecorderStop(reason: CaptureStopReason) {
+    const capture = activeCaptureRef.current;
+    if (!capture || capture.recorder.state === "inactive") return;
+    // Reason belongs to the recorder generation; stop() never discards captured chunks.
+    if (!capture.stopReason) capture.stopReason = reason;
+    try {
+      capture.recorder.stop();
+    } catch (error) {
+      reportFailure("voice", "Audioaufnahme konnte nicht beendet werden", error);
+    }
+  }
+
+  function stopVoiceModeInternal({ updateStatus, cancel = false }: { updateStatus: boolean; cancel?: boolean }) {
+    voiceStartGenerationRef.current += 1;
     voiceModeEnabledRef.current = false;
     setVoiceModeEnabled(false);
-
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch {
-        // ignore
-      }
+    requestRecorderStop(cancel ? "cancel" : "manual");
+    if (cancel) {
+      segmentOrderRef.current.cancel();
+      wakeWindowRef.current.reset();
     }
 
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
     }
-
     shutdownAudioNodes();
-
     if (updateStatus) {
-      setStatus("Sprachmodus aus.");
+      setStatus("Sprachmodus aus; gültige Audiosegmente werden fertig verarbeitet.");
+      setVoiceStage("Mikrofon aus · ausstehende Aufnahme wird verarbeitet");
     }
   }
 
@@ -845,96 +868,121 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     }
   }
 
-  async function flushVoiceQueue() {
-    if (!chatAvailableRef.current) return;
-    if (voiceFlushRunningRef.current || busyRef.current || !sessionId) {
-      return;
-    }
-
-    const nextMessage = voiceQueueRef.current.shift();
-    if (!nextMessage) {
-      return;
-    }
-
-    voiceFlushRunningRef.current = true;
-    try {
-      const sent = await submitMessage(nextMessage, "voice");
-      if (!sent) {
-        voiceQueueRef.current.unshift(nextMessage);
-      }
-    } finally {
-      voiceFlushRunningRef.current = false;
-    }
-
-    if (!busyRef.current && voiceQueueRef.current.length > 0) {
-      window.setTimeout(() => {
-        void flushVoiceQueue();
-      }, 80);
-    }
+  function refreshVoiceEntries() {
+    setVoiceEntries(voiceQueueRef.current.snapshot());
   }
 
-  function enqueueVoiceMessage(message: string) {
-    if (!chatAvailableRef.current) return;
-    const trimmed = message.trim();
-    if (!trimmed) {
-      return;
+  async function flushVoiceQueue() {
+    if (!chatAvailableRef.current || voiceDisposedRef.current) return;
+    if (voiceFlushRunningRef.current || busyRef.current || !sessionId) return;
+    const next = voiceQueueRef.current.claimNext();
+    if (!next) return;
+    voiceFlushRunningRef.current = true;
+    refreshVoiceEntries();
+    busyRef.current = true;
+    setBusy(true);
+    setVoiceStage("Befehl wird an den Agent gesendet");
+    syncAssistantMode();
+    try {
+      const acknowledged = await sendChat(sessionId, next.command);
+      voiceQueueRef.current.settle(next.id, "accepted", acknowledged.run_id);
+      // Voice transcripts are shown in the queue before POST, in Chat only after ACK.
+      // If a user consciously retries after an unknown result, only one chat bubble
+      // is shown per utterance even if the backend cannot guarantee exactly once.
+      setMessages((previous) => {
+        if (previous.some((item) => item.id === Number(next.id))) return previous;
+        return [...previous, {
+          id: Number(next.id), role: "user", content: next.command,
+          created_at: new Date().toISOString()
+        }];
+      });
+      setVoiceStage("Befehl vom Agent angenommen");
+      armBusyWatchdog();
+    } catch (error) {
+      const rejected = error instanceof ChatSubmissionError && error.outcome === "rejected";
+      voiceQueueRef.current.settle(next.id, rejected ? "failed" : "pending",
+        error instanceof Error ? error.message : String(error));
+      setVoiceStage(rejected
+        ? "Chat hat den Befehl abgelehnt · erneutes Senden möglich"
+        : "Übermittlung unklar · bitte vor erneutem Senden prüfen");
+      releaseBusyLock();
+      reportFailure("chat", "Sprachbefehl nicht bestätigt", error);
+    } finally {
+      voiceFlushRunningRef.current = false;
+      refreshVoiceEntries();
     }
+    // Accepted requests retain the busy lock until the normal response lifecycle.
+    // Failed/uncertain head entries block following commands; never retry in a loop.
+    if (!busyRef.current && chatAvailableRef.current) void flushVoiceQueue();
+  }
 
-    voiceQueueRef.current.push(trimmed);
+  function enqueueVoiceMessage(id: string, transcript: string, command: string, capturedAt: number) {
+    if (voiceDisposedRef.current) return;
+    voiceQueueRef.current.add(id, transcript, command, capturedAt);
+    refreshVoiceEntries();
+    setVoiceStage(chatAvailableRef.current ? "Transkript erkannt · Bereit zur Übergabe" :
+      "Transkript erkannt · Chat momentan nicht verfügbar (wartet)");
     void flushVoiceQueue();
   }
 
-  async function handleRecordedSegment(blob: Blob) {
-    if (blob.size === 0 || !chatAvailableRef.current) {
-      return;
+  function retryVoiceMessage(id: string) {
+    const entry = voiceQueueRef.current.snapshot().find((item) => item.id === id);
+    if (!entry) return;
+    if (entry.state === "pending" && !window.confirm(
+      "Die vorherige Übermittlung könnte bereits ausgeführt worden sein. Trotzdem bewusst erneut senden?"
+    )) return;
+    if (voiceQueueRef.current.retryByUser(id)) {
+      refreshVoiceEntries();
+      void flushVoiceQueue();
     }
+  }
 
+  function discardVoiceMessage(id: string) {
+    if (voiceQueueRef.current.discardByUser(id)) {
+      refreshVoiceEntries();
+      setVoiceStage("Ausstehende Eingabe bewusst verworfen");
+      void flushVoiceQueue();
+    }
+  }
+
+  async function handleRecordedSegment(blob: Blob, speechStartedAt: number, segmentId: number) {
+    if (blob.size === 0 || voiceDisposedRef.current) return;
     try {
       setStatus("Transkribiere Audio lokal...");
+      setVoiceStage("Sprache aufgenommen · Whisper transkribiert");
       const result = await transcribe(blob);
+      if (voiceDisposedRef.current) return;
       const text = result.text.trim();
       if (!text) {
-        setVoiceTranscriptPreview("");
+        setVoiceStage("Keine Sprache erkannt");
         setStatus("Keine Sprache erkannt.");
         return;
       }
       setVoiceTranscriptPreview(text);
-
-      if (isVoiceInputSuppressed()) {
-        setStatus("Audioeingabe waehrend eigener Sprachausgabe ignoriert.");
-        return;
-      }
-
       if (isLikelyEchoTranscript(text, lastAssistantSpokenTextRef.current)) {
-        setStatus("Eigenes Lautsprecher-Echo erkannt und ignoriert.");
+        setVoiceStage("Eigenes Lautsprecher-Echo verworfen");
         return;
       }
-
-      if (shouldIgnoreTranscriptArtifact(text)) {
-        const normalized = normalizeForEchoCheck(text);
-        if (WAKE_WORD_ONLY_PATTERNS.includes(normalized)) {
-          setStatus("Wakeword erkannt. Bitte direkt danach den Auftrag sprechen.");
-        } else {
-          setStatus("Unsichere STT-Ausgabe erkannt und verworfen.");
-        }
+      if (shouldIgnoreTranscriptArtifact(text) && !WAKE_WORD_ONLY_PATTERNS.includes(normalizeForEchoCheck(text))) {
+        setVoiceStage("Unsichere Spracherkennung verworfen");
         return;
       }
-
-      const wakeCommand = extractWakeWordCommand(text);
-      if (wakeCommand === null) {
-        setStatus("Ignoriert: Bitte mit `Jarvis ...` am Satzanfang sprechen.");
+      const decision = wakeWindowRef.current.accept(text, speechStartedAt);
+      if (decision.kind === "wake") {
+        setVoiceStage("Wakeword erkannt · Warte auf Folgebefehl (8 Sekunden)");
+        setStatus("Jarvis erkannt. Bitte jetzt den Auftrag sprechen.");
         return;
       }
-
-      if (!wakeCommand) {
-        setStatus("Wakeword erkannt. Bitte direkt danach den Auftrag sprechen.");
+      if (decision.kind === "ignored") {
+        setVoiceStage("Ohne Wakeword ignoriert · bitte „Jarvis“ sagen");
+        setStatus("Ignoriert: Bitte zuerst „Jarvis“ sagen.");
         return;
       }
-
-      setStatus(`Erkannt (${result.latency_ms} ms): ${wakeCommand}`);
-      enqueueVoiceMessage(wakeCommand);
-      setVoiceTranscriptPreview("");
+      setStatus(`Erkannt (${result.latency_ms} ms): ${decision.command}`);
+      enqueueVoiceMessage(String(uniqueMessageId()), text, decision.command, speechStartedAt);
     } catch (error) {
+      if (voiceDisposedRef.current) return;
+      setVoiceStage("Whisper-Fehler · bitte Eingabe erneut sprechen");
       reportFailure("voice", "Spracherkennung fehlgeschlagen", error);
     }
   }
@@ -954,89 +1002,71 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
 
   function startRecorderSegment() {
     const stream = mediaStreamRef.current;
-    if (!stream || !voiceModeEnabledRef.current || isVoiceInputSuppressed()) {
-      return;
-    }
-
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-      return;
-    }
+    if (!stream || !voiceModeEnabledRef.current || isVoiceInputSuppressed()) return;
+    // Keep the previous recorder until onstop has consumed its final dataavailable.
+    if (mediaRecorderRef.current) return;
 
     const mimeType = pickRecorderMimeType();
-    const recorderOptions: MediaRecorderOptions = {
-      audioBitsPerSecond: 128_000
-    };
-    if (mimeType) {
-      recorderOptions.mimeType = mimeType;
-    }
+    const recorderOptions: MediaRecorderOptions = { audioBitsPerSecond: 128_000 };
+    if (mimeType) recorderOptions.mimeType = mimeType;
     const recorder = new MediaRecorder(stream, recorderOptions);
-    let partialTimer: number | null = null;
-    let partialTranscription: Promise<void> = Promise.resolve();
-    let partialInFlight = false;
-
-    mediaChunksRef.current = [];
-    segmentStartAtRef.current = Date.now();
-    lastSpeechAtRef.current = Date.now();
-    speechDetectedInSegmentRef.current = false;
+    const capture: RecordedCapture = {
+      id: ++captureCounterRef.current,
+      recorder,
+      chunks: [],
+      startedAt: Date.now(),
+      speechStartedAt: null,
+      hadSpeech: false,
+      stopReason: null,
+      finalized: false
+    };
+    activeCaptureRef.current = capture;
+    mediaRecorderRef.current = recorder;
+    lastSpeechAtRef.current = capture.startedAt;
     silenceFrameCountRef.current = 0;
     voiceGateOpenRef.current = false;
 
     recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        mediaChunksRef.current.push(event.data);
-      }
+      if (!capture.finalized && event.data.size > 0) capture.chunks.push(event.data);
+    };
+
+    recorder.onerror = () => {
+      capture.stopReason = "cancel";
+      reportFailure("voice", "Fehler bei der Mikrofonaufnahme", "MediaRecorder hat einen Aufnahmefehler gemeldet.");
+      // Browser error events are normally followed by a final dataavailable/onstop.
     };
 
     recorder.onstop = () => {
-      if (partialTimer !== null) {
-        window.clearInterval(partialTimer);
-        partialTimer = null;
-      }
-      const blob = new Blob(mediaChunksRef.current, {
-        type: recorder.mimeType || "audio/webm"
-      });
-      mediaChunksRef.current = [];
-      mediaRecorderRef.current = null;
-
-      const hadSpeech = speechDetectedInSegmentRef.current;
-      if (hadSpeech && !isVoiceInputSuppressed()) {
-        void (async () => {
-          await partialTranscription;
-          await handleRecordedSegment(blob);
-        })();
+      if (capture.finalized) return;
+      capture.finalized = true;
+      if (activeCaptureRef.current === capture) activeCaptureRef.current = null;
+      if (mediaRecorderRef.current === recorder) mediaRecorderRef.current = null;
+      const blob = new Blob(capture.chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
+      capture.chunks = [];
+      const duration = Date.now() - capture.startedAt;
+      // On manual stop, retain a plausible utterance even if local VAD missed
+      // a quiet word. Empty recordings, cancelled captures and TTS echo remain gated.
+      const eligible = capture.stopReason !== "cancel" && blob.size > 0 &&
+        (capture.hadSpeech || (capture.stopReason === "manual" && duration >= MIN_SEGMENT_MS));
+      if (eligible) {
+        segmentOrderRef.current.complete(capture.id, async () => {
+          await handleRecordedSegment(blob, capture.speechStartedAt ?? capture.startedAt, capture.id);
+        });
       } else {
-        setVoiceTranscriptPreview("");
+        segmentOrderRef.current.skip(capture.id);
       }
-
-      if (voiceModeEnabledRef.current && mediaStreamRef.current) {
-        resumeRecorderAfterSuppression();
-      }
+      if (voiceModeEnabledRef.current && mediaStreamRef.current) resumeRecorderAfterSuppression();
     };
 
-    recorder.start(1000);
-    mediaRecorderRef.current = recorder;
-    partialTimer = window.setInterval(() => {
-      if (partialInFlight || !speechDetectedInSegmentRef.current || mediaChunksRef.current.length === 0) {
-        return;
-      }
-      const snapshot = new Blob([...mediaChunksRef.current], {
-        type: recorder.mimeType || "audio/webm"
-      });
-      if (snapshot.size === 0) return;
-      partialInFlight = true;
-      partialTranscription = transcribe(snapshot)
-        .then((result) => {
-          if (voiceModeEnabledRef.current && result.text.trim()) {
-            setVoiceTranscriptPreview(result.text.trim());
-          }
-        })
-        .catch(() => {
-          // Partial recognition is best effort; the final segment reports errors.
-        })
-        .finally(() => {
-          partialInFlight = false;
-        });
-    }, 2500);
+    try {
+      recorder.start(1000);
+    } catch (error) {
+      if (activeCaptureRef.current === capture) activeCaptureRef.current = null;
+      if (mediaRecorderRef.current === recorder) mediaRecorderRef.current = null;
+      capture.finalized = true;
+      segmentOrderRef.current.skip(capture.id);
+      throw error;
+    }
   }
 
   function startVoiceMonitor() {
@@ -1052,8 +1082,9 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       const analyser = analyserRef.current;
       const data = analyserDataRef.current;
       const recorder = mediaRecorderRef.current;
+      const capture = activeCaptureRef.current;
 
-      if (!analyser || !data || !recorder || recorder.state !== "recording") {
+      if (!analyser || !data || !recorder || !capture || capture.recorder !== recorder || recorder.state !== "recording") {
         monitorRafRef.current = requestAnimationFrame(loop);
         return;
       }
@@ -1075,21 +1106,22 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
 
       if (hasVoiceFrame) {
         voiceGateOpenRef.current = true;
-        speechDetectedInSegmentRef.current = true;
+        if (!capture.hadSpeech) capture.speechStartedAt = now;
+        capture.hadSpeech = true;
         lastSpeechAtRef.current = now;
         silenceFrameCountRef.current = 0;
       } else {
         voiceGateOpenRef.current = false;
-        if (speechDetectedInSegmentRef.current) {
+        if (capture.hadSpeech) {
           silenceFrameCountRef.current += 1;
         }
       }
 
-      const elapsed = now - segmentStartAtRef.current;
+      const elapsed = now - capture.startedAt;
       const silenceElapsed = now - lastSpeechAtRef.current;
 
       const shouldCutBySilence =
-        speechDetectedInSegmentRef.current &&
+        capture.hadSpeech &&
         silenceElapsed >= SILENCE_TIMEOUT_MS &&
         silenceFrameCountRef.current >= SILENCE_CONFIRM_FRAMES &&
         elapsed >= MIN_SEGMENT_MS;
@@ -1097,11 +1129,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       const shouldCutByMaxLength = elapsed >= MAX_SEGMENT_MS;
 
       if (shouldCutBySilence || shouldCutByMaxLength) {
-        try {
-          recorder.stop();
-        } catch {
-          // ignore
-        }
+        requestRecorderStop(shouldCutBySilence ? "silence" : "max");
       }
 
       monitorRafRef.current = requestAnimationFrame(loop);
@@ -1111,57 +1139,66 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
   }
 
   async function startVoiceMode() {
-    if (!chatAvailableRef.current) {
-      return;
-    }
-    if (voiceModeEnabledRef.current) {
+    if (!chatAvailableRef.current || voiceModeEnabledRef.current || voiceStartInProgressRef.current) return;
+    const stt = setupCheck.report?.stt;
+    if (stt && stt.status !== "available") {
+      const hint = whisperSetupHint(stt.reason);
+      setVoiceStage(hint);
+      reportFailure("voice", "Spracherkennung nicht verfügbar", hint);
       return;
     }
 
+    const attempt = ++voiceStartGenerationRef.current;
+    voiceStartInProgressRef.current = true;
+    let stream: MediaStream | null = null;
+    let context: AudioContext | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      setVoiceStage("Mikrofon wird initialisiert");
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          channelCount: 1,
-          sampleRate: 48000,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
+          channelCount: 1, sampleRate: 48000, echoCancellation: true,
+          noiseSuppression: true, autoGainControl: true
         }
       });
-
-      if (!chatAvailableRef.current) {
-        stream.getTracks().forEach((track) => track.stop());
-        return;
-      }
+      if (voiceDisposedRef.current || !chatAvailableRef.current || attempt !== voiceStartGenerationRef.current) return;
 
       const browserWindow = window as typeof window & { webkitAudioContext?: typeof AudioContext };
       const AudioContextCtor = browserWindow.AudioContext || browserWindow.webkitAudioContext;
-      if (!AudioContextCtor) {
-        throw new Error("AudioContext wird in diesem Browser nicht unterstuetzt.");
-      }
-
-      const context = new AudioContextCtor();
+      if (!AudioContextCtor) throw new Error("AudioContext wird in diesem Browser nicht unterstützt.");
+      context = new AudioContextCtor();
       const source = context.createMediaStreamSource(stream);
       const analyser = context.createAnalyser();
       analyser.fftSize = 2048;
       source.connect(analyser);
       await context.resume();
+      if (voiceDisposedRef.current || !chatAvailableRef.current || attempt !== voiceStartGenerationRef.current) return;
 
       audioContextRef.current = context;
       sourceNodeRef.current = source;
       analyserRef.current = analyser;
       analyserDataRef.current = new Uint8Array(analyser.fftSize);
-
       mediaStreamRef.current = stream;
       voiceModeEnabledRef.current = true;
       setVoiceModeEnabled(true);
-
       startRecorderSegment();
       startVoiceMonitor();
-      setStatus("Sprachmodus aktiv: Sprechen und kurz pausieren zum automatischen Senden.");
+      setVoiceStage("Mikrofon aktiv · „Jarvis“ sagen");
+      setStatus("Sprachmodus aktiv: Sage „Jarvis“, dann innerhalb von 8 Sekunden deinen Befehl.");
     } catch (error) {
-      stopVoiceModeInternal({ updateStatus: false });
-      reportFailure("voice", "Sprachmodus konnte nicht gestartet werden", error);
+      if (!voiceDisposedRef.current && attempt === voiceStartGenerationRef.current) {
+        stopVoiceModeInternal({ updateStatus: false });
+        setVoiceStage("Mikrofonfehler · Einstellungen prüfen");
+        reportFailure("voice", "Sprachmodus konnte nicht gestartet werden", error);
+      }
+    } finally {
+      // A failed or cancelled start owns its local stream/context until released.
+      if (stream && mediaStreamRef.current !== stream) {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+      if (context && audioContextRef.current !== context) {
+        try { await context.close(); } catch { /* Already closed. */ }
+      }
+      voiceStartInProgressRef.current = false;
     }
   }
 
@@ -1244,7 +1281,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       },
       {
         id: "toggle-voice-input",
-        disabled: !chatAvailable && !voiceModeEnabled,
+        disabled: (!chatAvailable || sttUnavailable) && !voiceModeEnabled,
         label: voiceModeEnabled ? "Sprachmodus stoppen" : "Sprachmodus starten",
         hint: voiceModeEnabled ? "Sprachmodus deaktivieren" : "Sprachmodus aktivieren",
         keywords: ["voice", "mic", "input", voiceModeEnabled ? "voice input: stop" : "voice input: start"],
@@ -1264,7 +1301,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
         run: () => setVoiceRepliesEnabled((previous) => !previous)
       }
     ];
-  }, [voiceModeEnabled, voiceRepliesEnabled, switchTab, sessionId, busy, chatAvailable]);
+  }, [voiceModeEnabled, voiceRepliesEnabled, switchTab, sessionId, busy, chatAvailable, sttUnavailable]);
 
   const filteredCommandItems = useMemo(() => {
     const query = commandQuery.trim().toLowerCase();
@@ -1328,12 +1365,20 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
 
   useEffect(() => {
     if (!chatAvailable) {
-      voiceQueueRef.current = [];
-      stopVoiceModeInternal({ updateStatus: false });
+      // A transient setup recheck is not a user request to destroy transcripts.
+      // Capture may stop, but queued and in-flight STT is finalized normally.
+      if (voiceModeEnabledRef.current) stopVoiceModeInternal({ updateStatus: false });
+      if (voiceQueueRef.current.snapshot().length > 0) {
+        setVoiceStage("Chat vorübergehend nicht verfügbar · Eingaben bleiben erhalten");
+      }
+    } else {
+      void flushVoiceQueue();
     }
   }, [chatAvailable]);
 
   useEffect(() => {
+    voiceDisposedRef.current = false;
+    segmentOrderRef.current = new OrderedSegmentProcessor();
     let cancelled = false;
 
     async function bootstrap() {
@@ -1381,7 +1426,8 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       clearBusyWatchdog();
       clearTokenFlushTimer();
       tokenBufferByRunRef.current = {};
-      stopVoiceModeInternal({ updateStatus: false });
+      voiceDisposedRef.current = true;
+      stopVoiceModeInternal({ updateStatus: false, cancel: true });
       ttsQueueRef.current = [];
       spokenOffsetByRunRef.current = {};
       thinkingRunsRef.current.clear();
@@ -1660,13 +1706,42 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
                   </button>
                 ))}
               </div>
-              <small>Sprich Jarvis im Sprachmodus mit „Jarvis …“ an.</small>
-              {voiceModeEnabled ? (
-                <small className="voice-transcript-preview" aria-live="polite">
-                  {voiceTranscriptPreview || "Ich höre zu … der erkannte Text erscheint hier."}
-                </small>
-              ) : null}
+              <small>„Jarvis, öffne …“ oder „Jarvis“ und anschließend den Auftrag sagen.</small>
             </div>
+            {(voiceModeEnabled || voiceStage || voiceEntries.length > 0 || voiceTranscriptPreview) && (
+              <div className="voice-reliability-panel" aria-label="Sprachverarbeitung">
+                <p role="status" aria-live="polite">
+                  {voiceStage || (voiceModeEnabled ? "Mikrofon aktiv" : "Mikrofon aus")}
+                </p>
+                {voiceTranscriptPreview && (
+                  <p className="voice-final-transcript">Letztes Transkript: {voiceTranscriptPreview}</p>
+                )}
+                {voiceEntries.length > 0 && (
+                  <ul aria-label="Sprachbefehle und Übergabestatus">
+                    {voiceEntries.map((entry) => (
+                      <li key={entry.id}>
+                        <span>{entry.command}</span>
+                        <small>{entry.state === "accepted" ? "Vom Agent angenommen" :
+                          entry.state === "submitting" ? "Wird gesendet" :
+                          entry.state === "pending" ? "Ausgang unklar — eventuell bereits ausgeführt" :
+                          entry.state === "failed" ? "Abgelehnt — nicht gesendet" :
+                          chatAvailable ? "Bereit zum Senden" : "Wartet auf Chat-Verfügbarkeit"}</small>
+                        {(entry.state === "pending" || entry.state === "failed") && (
+                          <button type="button" className="secondary" onClick={() => retryVoiceMessage(entry.id)}>
+                            Erneut senden
+                          </button>
+                        )}
+                        {(entry.state === "ready" || entry.state === "pending" || entry.state === "failed") && (
+                          <button type="button" className="secondary" onClick={() => discardVoiceMessage(entry.id)}>
+                            Verwerfen
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
 
             <textarea
               disabled={!chatAvailable}
@@ -1681,7 +1756,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
               <button
                 type="button"
                 className={`record ${voiceModeEnabled ? "active" : ""}`}
-                disabled={!chatAvailable && !voiceModeEnabled}
+                disabled={(!chatAvailable || sttUnavailable) && !voiceModeEnabled}
                 onClick={() => {
                   if (voiceModeEnabled) {
                     stopVoiceMode();

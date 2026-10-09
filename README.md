@@ -112,8 +112,8 @@ npm run dev:agent:reload
 
 - Click once to start voice mode, click again to stop.
 - Audio is transcribed locally and auto-sent after a short pause.
-- Voice command gating is enabled: commands are only sent if the sentence starts with `Jarvis ...`.
-- Wake-word only input (for example just `Jarvis`) is ignored.
+- Voice commands work as `Jarvis, ...` in one segment or `Jarvis` followed by a command in a separate recording within 8 seconds of captured speech (Whisper processing time does not shorten the window).
+- Voice transcripts stay visible after stopping the microphone. A pending/uncertain chat submission never retries itself; use the explicit controls to retry or discard it.
 - `Text only` disables automatic spoken replies.
 - Echo suppression is active to avoid re-capturing speaker output.
 

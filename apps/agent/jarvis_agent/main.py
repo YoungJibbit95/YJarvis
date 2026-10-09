@@ -169,9 +169,8 @@ async def update_settings(payload: JarvisSettingsUpdate) -> JarvisSettings:
 async def transcribe(file: UploadFile = File(...)) -> TranscriptionResponse:
     suffix = Path(file.filename or "upload.bin").suffix or ".bin"
     file_path = config.audio_tmp_dir / f"upload-{uuid.uuid4().hex}{suffix}"
-    file_path.write_bytes(await file.read())
-
     try:
+        file_path.write_bytes(await file.read())
         settings = await database.get_settings()
         text, language, latency_ms = await transcribe_with_whisper_cpp(
             source_path=file_path,

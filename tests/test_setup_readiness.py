@@ -39,6 +39,7 @@ def rig(tmp_path, monkeypatch):
 
     monkeypatch.setattr(readiness.httpx, "AsyncClient", client)
     monkeypatch.setattr(readiness, "find_whisper_binary", lambda *_: "/fixture/whisper-cli")
+    monkeypatch.setattr(readiness, "find_system_tool", lambda *_: "/fixture/ffmpeg")
     return settings, response, calls, tmp_path / "whisper.bin"
 
 
@@ -126,6 +127,16 @@ def test_stt_is_missing_when_model_exists_but_whisper_cli_does_not(rig, monkeypa
     result = asyncio.run(readiness.inspect_setup(settings, default))
     assert result.stt.status == "missing"
     assert result.stt.reason == "whisper_cli_missing"
+
+
+def test_stt_is_missing_when_ffmpeg_unavailable_despite_model_and_binary(rig, monkeypatch):
+    settings, _, _, default = rig
+    default.write_bytes(b"model fixture")
+    monkeypatch.setattr(readiness, "find_system_tool", lambda *_: None)
+    result = asyncio.run(readiness.inspect_setup(settings, default))
+    assert result.stt.status == "missing"
+    assert result.stt.reason == "ffmpeg_missing"
+    assert result.state == "degraded"
 
 
 def test_directory_empty_and_unreadable_files_are_not_available(tmp_path, monkeypatch):

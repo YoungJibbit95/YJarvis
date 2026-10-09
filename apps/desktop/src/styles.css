@@ -205,3 +205,21 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   .actions button[type="submit"], .approval-confirm { color: ButtonText; background: ButtonFace; border-color: ButtonText; }
   .shell-navigation button.active { border: 2px solid Highlight; color: Highlight; }
 }
+
+/* Voice feedback uses the accepted Jarvis tokens, without redesigning the chat. */
+.voice-reliability-panel {
+  margin: 9px 0 10px; padding: 9px 12px;
+  border: 1px solid var(--yj-border-lit); border-radius: 11px;
+  background: #071a2c99; color: var(--yj-text-muted); font: 12px/1.5 var(--yj-font-body);
+}
+.voice-reliability-panel p { margin: 0 0 4px; }
+.voice-reliability-panel [role="status"] { color: var(--yj-accent); }
+.voice-reliability-panel .voice-final-transcript { overflow-wrap: anywhere; color: var(--yj-text); }
+.voice-reliability-panel ul { margin: 6px 0 0; padding: 0; list-style: none; max-height: 130px; overflow: auto; }
+.voice-reliability-panel li {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 5px 0; border-top: 1px solid var(--yj-border);
+}
+.voice-reliability-panel li > span { flex: 1 1 180px; overflow-wrap: anywhere; color: var(--yj-text); }
+.voice-reliability-panel li > small { flex: 1 1 100px; }
+.voice-reliability-panel button { min-height: 26px; font-size: 11px; padding: 3px 8px; }
