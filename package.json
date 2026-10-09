@@ -13,7 +13,12 @@
     "typecheck": "npm run typecheck --workspace apps/desktop",
     "build": "npm run build --workspace apps/desktop",
     "dist:win": "node scripts/package-windows.mjs",
-    "dist:mac": "cd apps/desktop && node package-mac.mjs"
+    "dist:mac": "cd apps/desktop && node package-mac.mjs",
+    "test:packaging": "node --test tests/packaging/*.test.cjs",
+    "test:packaged-backend": "node scripts/smoke-packaged-backend.mjs",
+    "dev:agent": "node scripts/dev.mjs agent",
+    "dev:agent:reload": "node scripts/dev.mjs agent-reload",
+    "test:startup": "node --test tests/startup/startup.test.cjs"
   },
   "devDependencies": {
     "electron-builder": "^26.15.3"

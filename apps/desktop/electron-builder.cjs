@@ -4,7 +4,8 @@ module.exports = {
   appId: "com.yjarvis.desktop",
   productName: "YJarvis",
   electronVersion: require("electron/package.json").version,
-  directories: { output: "../../release" },
+  // Windows smoke/installer scripts read release/windows; macOS keeps PR34 release output.
+  directories: { output: process.platform === "darwin" ? "../../release" : "../../release/windows" },
   files: ["dist/**/*", "electron/**/*", "package.json"],
   extraResources: [
     { from: "../../scripts/startup.cjs", to: "startup.cjs" },
