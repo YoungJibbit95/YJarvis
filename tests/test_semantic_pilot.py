@@ -73,7 +73,7 @@ def test_allowlisted_grounded_single_tool_decision(pilot, text, name, args, fiel
     pilot.learning.rank_tool_specs_for_planner.assert_awaited_once()
 
 
-@pytest.mark.parametrize("returned,request", [
+@pytest.mark.parametrize("returned,utterance", [
     ({"decision": "tool", "tool_name": "open_app",
       "tool_input": {"app_name": "Chrome"}}, "Aktiviere bitte die App Safari"),
     ({"decision": "tool", "tool_name": "open_app",
@@ -105,9 +105,9 @@ def test_allowlisted_grounded_single_tool_decision(pilot, text, name, args, fiel
     ({"decision": "clarify", "question": "Bitte schicke dein Passwort?"}, "Aktiviere bitte die App Safari"),
     ({"decision": "clarify", "question": "Ausführen."}, "Aktiviere bitte die App Safari"),
 ])
-def test_invalid_or_hallucinated_output_cannot_create_tool_intent(pilot, returned, request):
+def test_invalid_or_hallucinated_output_cannot_create_tool_intent(pilot, returned, utterance):
     pilot.model.return_value = returned
-    assert asyncio.run(pilot.adapter.plan(request, {})) is None
+    assert asyncio.run(pilot.adapter.plan(utterance, {})) is None
     pilot.model.assert_awaited_once()
 
 
