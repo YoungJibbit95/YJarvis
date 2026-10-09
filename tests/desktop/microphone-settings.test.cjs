@@ -11,6 +11,13 @@ function nodes(node) {
   return [node, ...nodes(node.props?.children)];
 }
 
+function readableText(node) {
+  if (Array.isArray(node)) return node.map(readableText).join("");
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (!node || typeof node !== "object") return "";
+  return readableText(node.props?.children);
+}
+
 async function rig({ selectedId = "", sttAvailable = false, level = 175,
   getUserMediaError = null, recorderError = false, emptyBlob = false } = {}) {
   const slots = [], effects = [], recorders = [], tracks = [], contexts = [], calls = [], transcripts = [];
@@ -131,6 +138,7 @@ async function rig({ selectedId = "", sttAvailable = false, level = 175,
     tick() { for (const fn of timers.values()) fn(); },
     devices(next) { devices = next; listeners.get("devicechange")?.(); },
     disconnected: () => deviceDisconnected,
+    visibleText: () => readableText(tree),
     unmount() { slots.forEach(slot => slot?.cleanup?.()); },
   };
 }
@@ -161,7 +169,7 @@ test("Whisper test transcribes locally but does not send a chat request", async 
   h.button("Test beenden").props.onClick(); await h.settle();
   assert.equal(h.transcripts.length, 1);
   assert.match(h.status(), /Test erkannt/);
-  assert.match(h.status(), /45 ms/);
+  assert.match(h.visibleText(), /Whisper-Latenz: 45 ms/);
   assert.equal(h.tracks[0].stopped, true);
 });
 

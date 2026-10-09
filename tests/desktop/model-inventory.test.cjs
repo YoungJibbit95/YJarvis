@@ -93,7 +93,7 @@ async function harness(inventoryResponse = actualInventory) {
     "../setup/GuidedInstaller": { GuidedInstaller: function Installer() {} },
     "../setup/ModelCatalogBrowser": { ModelCatalogBrowser: function ModelCatalog() {} },
     "../voice/MicrophoneSettings": { MicrophoneSettings: function Mic() {} },
-  });
+  }, { AbortController });
 
   async function settle() {
     for (let i = 0; i < 20; i++) {

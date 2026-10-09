@@ -26,9 +26,11 @@ export function microphoneConstraints(deviceId: string): MediaStreamConstraints 
 }
 
 export function microphoneDeviceOptions(devices: MediaDeviceInfo[]): Array<{ id: string; label: string }> {
-  return devices.filter((device) => device.kind === "audioinput" && device.deviceId !== "default" && device.deviceId !== "communications")
-    .map((device, index) => ({ id: device.deviceId, label: device.label || ("Mikrofon " + (index + 1) + " (Name durch Betriebssystem verborgen)") }))
-    .filter((device) => device.id.length > 0);
+  return devices
+    .filter(device => device.kind === "audioinput" && !!device.deviceId &&
+      device.deviceId !== "default" && device.deviceId !== "communications")
+    .map((device, index) => ({ id: device.deviceId,
+      label: device.label || ("Mikrofon " + (index + 1) + " (Name durch Betriebssystem verborgen)") }));
 }
 
 export function microphoneErrorMessage(error: unknown, platform: string): string {
