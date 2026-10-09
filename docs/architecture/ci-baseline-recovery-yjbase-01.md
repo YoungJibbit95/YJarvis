@@ -33,3 +33,11 @@ The production renderer remains `src/main.tsx` → `SetupGate` → `App.tsx` and
 The existing FastAPI `AgentService` uses `LegacyRouting` and retrieves settings from `Database` during runs. No cache API, new multi-step planner, per-run metrics endpoint or new DB migration is introduced by this recovery. Tests covering accepted domain contracts, learning behavior, persistence/migrations, routing, setup, tools, native helpers, startup and packaging remain active.
 
 Do not infer working microphones, model downloads, TTS, Apple Silicon package creation or full macOS integration from headless Linux/Windows CI alone. YJVOICE-01 remains blocked until this recovery is externally reviewed, merged by the user, and the new main CI is green.
+
+## First PR CI exposed the next blocked installer step
+
+- PR #35 initial head `13c2ed0` passed Python/desktop/lint/wiki and restored the packaging tests, but `windows-installer` failed later at **frozen backend smoke**.
+- CI build log proved electron-builder emitted `release/win-unpacked`, while `scripts/smoke-packaged-backend.mjs` and `scripts/smoke-windows-installer.ps1` require `release/windows/win-unpacked`.
+- Root cause: PR #34 changed the shared `electron-builder.cjs` output directory from `../../release/windows` to `../../release` for macOS packaging without keeping the existing Windows output contract.
+- Recovery: select `../../release/windows` for Windows/non-macOS builds and preserve `../../release` on macOS; test both platform choices with a mocked Electron config loader.
+- No model, voice, runtime or installer-smoke shortcut is added. The real Windows NSIS build, frozen backend smoke, installed-file integrity and uninstall must all run and pass on the final PR head.

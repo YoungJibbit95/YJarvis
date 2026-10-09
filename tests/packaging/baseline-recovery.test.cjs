@@ -57,3 +57,26 @@ test("detached PR34 component prototypes cannot silently become production impor
   scan(src);
   assert.ok(inspected > 10, "expected to inspect actual renderer source files");
 });
+
+test("Electron builder output matches Windows smoke scripts without changing macOS output", () => {
+  const vm = require("node:vm");
+  const configSource = read("apps/desktop/electron-builder.cjs");
+  for (const [platform, expected] of [
+    ["win32", "../../release/windows"],
+    ["darwin", "../../release"]
+  ]) {
+    const sandbox = {
+      module: { exports: {} },
+      process: { platform },
+      require(name) {
+        if (name === "path") return path;
+        if (name === "electron/package.json") return { version: "33.2.1" };
+        throw new Error(`unexpected config dependency: ${name}`);
+      }
+    };
+    vm.runInNewContext(configSource, sandbox, { filename: "electron-builder.cjs" });
+    assert.equal(sandbox.module.exports.directories.output, expected);
+  }
+  assert.match(read("scripts/smoke-packaged-backend.mjs"), /release\/windows\/win-unpacked\/resources/);
+  assert.match(read("scripts/smoke-windows-installer.ps1"), /release\\windows\\/);
+});
