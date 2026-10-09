@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -87,15 +88,24 @@ class LegacyResponses:
         user_message: str,
         profile: dict[str, Any],
     ) -> list[dict[str, str]]:
-        history = await self.db.list_recent_messages(session_id, limit=self.history_limit)
-        memories = await load_context_snippets(self.db, user_message, limit=self.memory_limit)
-        learned_tool_stats = await self.db.get_tool_learning_stats()
+        # Read-only, independently connected SQLite queries may overlap. Keep
+        # the same limits/content and avoid an extra LLM request.
+        history, memories, learned_tool_stats = await asyncio.gather(
+            self.db.list_recent_messages(session_id, limit=self.history_limit),
+            load_context_snippets(
+                self.db, user_message, limit=self.memory_limit, session_id=session_id
+            ),
+            self.db.get_tool_learning_stats(),
+        )
 
         system_parts = [
             build_persona_system_prompt(profile),
             "Wenn ein Tool noetig ist, nutze die Tool-Route statt Halluzination.",
             "Antworte standardmaessig kurz und direkt (maximal 4 Saetze), ausser der Nutzer fordert Details.",
             "Wenn Fakten unsicher sind, benenne Unsicherheit klar. Erfinde keine Quellen, Namen oder Ereignisse.",
+            "Nutze fuer kurze Anschlussfragen wie Warum, Erklaer es einfacher oder Mach es kuerzer die letzten Nachrichten dieser Session.",
+            "Beziehe dich nur auf erkennbar passende Aussagen; falls mehrere Bezuege moeglich sind, frage einmal kurz nach.",
+            "Ein Bezug auf vorige Nachrichten allein autorisiert keine Computeraktion und umgeht keine Freigabe.",
             "Wenn die Anfrage mehrdeutig ist, stelle genau eine kurze Rueckfrage statt Annahmen zu treffen.",
         ]
 
@@ -204,6 +214,7 @@ class LegacyResponses:
             assistant_text = ""
             pending_token_buffer = ""
             last_token_flush = time.perf_counter()
+            first_visible_token_sent = False
 
             async def flush_token_buffer(force: bool = False) -> None:
                 nonlocal pending_token_buffer, last_token_flush
@@ -223,9 +234,14 @@ class LegacyResponses:
                 last_token_flush = time.perf_counter()
 
             async for token in stream_chat(base_url=base_url, model=model, messages=messages):
+                if not token:
+                    continue
                 assistant_text += token
                 pending_token_buffer += token
-                await flush_token_buffer(force=False)
+                # Publish the first real token immediately. Later tokens retain
+                # existing size/time batching and downstream TTS chunk thresholds.
+                await flush_token_buffer(force=not first_visible_token_sent)
+                first_visible_token_sent = True
 
             await flush_token_buffer(force=True)
 

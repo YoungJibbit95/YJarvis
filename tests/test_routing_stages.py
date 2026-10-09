@@ -84,10 +84,6 @@ def test_first_matching_stage_wins_even_when_all_later_stages_match(router, monk
     ('/learn "fokus" => oeffne Safari', {}, "Lernmodus aktualisiert"),
     ("hallo jarvis", {}, "Schnellantwort lokal"),
     ("mach mir eine erinnerung", {}, "Rueckfrage fuer praezisen Auftrag"),
-    # Existing substring/short-message collisions are compatibility, not new NLU.
-    ("datei lesen /tmp/test.txt", {}, "Utility-Antwort lokal"),
-    ("zeige erinnerungen 6", {}, "Rueckfrage fuer praezisen Auftrag"),
-    ("Jarvis, oeffne Safari", {}, "Utility-Antwort lokal"),
 ])
 def test_real_priority_collisions(router, message, safety, detail):
     result = route(router, message, {"safety": safety})
@@ -97,6 +93,66 @@ def test_real_priority_collisions(router, message, safety, detail):
     if detail == "Sicherheitsbestaetigung erforderlich":
         assert asyncio.run(router.db.list_learned_commands()) == []
 
+
+
+@pytest.mark.parametrize("message,tool_name,expected_input", [
+    ("Jarvis, öffne Safari", "open_app", {"app_name": "Safari"}),
+    ("Jarvis, oeffne Safari", "open_app", {"app_name": "Safari"}),
+    ("Lies diese Datei", None, None),
+    ("datei lesen /tmp/test.txt", "file_read", {"path": "/tmp/test.txt"}),
+    ("zeige erinnerungen 6", "reminder_list", {"limit": 6}),
+])
+def test_no_keyword_collision_with_actual_tool_intents(router, message, tool_name, expected_input):
+    result = route(router, message)
+    assert result.detail != "Utility-Antwort lokal"
+    assert result.intent is not None if tool_name else result.intent is None
+    if tool_name:
+        assert result.intent.tool_name == tool_name
+        assert result.intent.tool_input == expected_input
+    else:
+        assert result.reply == "Welche Datei soll ich lesen?"
+    router.planner.assert_not_awaited()
+
+
+@pytest.mark.parametrize("message", [
+    "Ich möchte über Dateien sprechen",
+    "Ich möchte über meine Erinnerungen sprechen",
+    "Erklär mir das einfacher",
+    "Mach es kürzer",
+    "Und was wäre die Alternative?",
+    "Warum?",
+])
+def test_conversation_is_not_misclassified_as_tool_action(router, message):
+    result = route(router, message)
+    assert result.intent is None
+    assert result.reply is None
+    router.planner.assert_not_awaited()
+
+
+@pytest.mark.parametrize("message,answer", [
+    ("Wie spät ist es?", "Uhr"),
+    ("Welches Datum haben wir?", "Heute ist"),
+    ("Bist du da?", "bin da"),
+])
+def test_explicit_utility_queries_bypass_planner(router, message, answer):
+    result = route(router, message)
+    assert result.detail == "Utility-Antwort lokal"
+    assert answer.lower() in result.reply.lower()
+    router.planner.assert_not_awaited()
+
+
+def test_unknown_explicit_tool_never_falls_through_to_planner(router):
+    result = route(router, '/tool unknown {"value":"oeffne Safari"}')
+    assert result.intent is None
+    assert result.detail == "Tool-Aufruf unklar, keine Ausfuehrung"
+    router.planner.assert_not_awaited()
+
+
+def test_reminder_with_content_asks_only_for_missing_time(router):
+    result = route(router, "Erinnere mich an den Einkauf.")
+    assert result.reply == "Wann soll ich dich daran erinnern?"
+    assert result.detail == "Rueckfrage fuer praezisen Auftrag"
+    router.planner.assert_not_awaited()
 
 @pytest.mark.parametrize("message, tool_name, tool_input", [
     ("öffne Safari bitte", "open_app", {"app_name": "Safari"}),
@@ -224,15 +280,13 @@ def test_confirmation_never_bypasses_hard_block_and_event_precedes_check(router,
 def test_unregistered_heuristic_reaches_only_enabled_legacy_planner(router, enabled):
     router.routing.planner.enable_tool_planner = enabled
     result = route(router, '/tool unknown {"value":1}')
-    # /tool alone is not a legacy tool-request hint; use an argument containing one.
     assert result.intent is None
+    assert result.detail == "Tool-Aufruf unklar, keine Ausfuehrung"
     router.planner.assert_not_awaited()
     result = route(router, '/tool unknown {"value":"oeffne"}')
-    assert router.planner.await_count == int(enabled)
-    if enabled:
-        assert result.intent == ToolCallIntent("open_app", {"app_name": "Notes"}, "planner")
-    else:
-        assert result.detail == "Tool-Aufruf unklar, keine Ausfuehrung"
+    assert result.intent is None
+    assert result.detail == "Tool-Aufruf unklar, keine Ausfuehrung"
+    router.planner.assert_not_awaited()
 
 
 def test_learn_action_retains_existing_planner_callback(router):

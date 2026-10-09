@@ -76,8 +76,8 @@ class LegacyRouting:
             return LegacyRoute(
                 normalized_user_message,
                 reply=normalize_honorifics(
-                    "Ich habe den Tool-Aufruf nicht eindeutig erkannt und fuehre daher nichts blind aus. "
-                    "Formulieren Sie bitte konkret, z. B. `Oeffne Safari` oder `Oeffne die App Notizen`."
+                    "Ich habe den Befehl nicht eindeutig erkannt. "
+                    "Welche konkrete Aktion meinst du?"
                 ),
                 detail="Tool-Aufruf unklar, keine Ausfuehrung",
             )
@@ -94,8 +94,18 @@ class LegacyRouting:
             if learned_intent:
                 return await self.learning.apply_adaptive_routing(learned_intent)
 
+        # Preserve learned triggers first, but never infer actions from generic
+        # mentions of files/reminders in an ordinary conversation.
+        if not looks_like_tool_request(user_message):
+            return None
+
         heuristic_intent = self.heuristic.match(user_message)
         if heuristic_intent:
             return await self.learning.apply_adaptive_routing(heuristic_intent)
+
+        # An explicit unknown /tool request must not silently become a
+        # *different* tool call through the optional language-model planner.
+        if user_message.strip().lower().startswith("/tool "):
+            return None
 
         return await self.planner.plan(user_message, settings)
