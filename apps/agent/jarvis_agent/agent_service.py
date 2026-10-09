@@ -14,6 +14,7 @@ from .orchestration.legacy_responses import LegacyResponses
 from .orchestration.legacy_routing import LegacyRouting
 from .orchestration.turn_engine import TurnEngine
 from .profile import load_profile
+from .runtime_facts import ReadOnlyToolkit
 from .tools import ToolRegistry
 
 
@@ -54,6 +55,7 @@ class AgentService:
             enable_llm_tool_summary=enable_llm_tool_summary,
             token_flush_interval_seconds=token_flush_interval_seconds,
             token_flush_min_chars=token_flush_min_chars,
+            read_only_toolkit=ReadOnlyToolkit(tools),
         )
         routing = LegacyRouting(tools, self.learning, responses, enable_tool_planner=enable_tool_planner)
         self.pending_confirmations = routing.pending_confirmations

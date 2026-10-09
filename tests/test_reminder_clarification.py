@@ -162,10 +162,12 @@ def test_missing_day_or_invalid_clock_never_sets_reminder(rig):
 
 
 def test_small_talk_switch_is_not_swallowed_as_reminder_content(rig):
+    rig.set_stream(["Sehr gerne."])
+
     async def scenario():
         await rig.service.start_run("session", "first", "Mach mir morgen um 10 Uhr eine Erinnerung.")
         await rig.service.start_run("session", "thanks", "Danke, Jarvis")
-        assert rig.events[-2]["content"] == "Gerne."
+        assert rig.events[-2]["content"] == "Sehr gerne."
         assert await rig.db.list_pending_approvals() == []
         assert not rig.service.turn_engine.routing.reminder_clarifications.has_pending("session")
         rig.tools.execute.assert_not_awaited()

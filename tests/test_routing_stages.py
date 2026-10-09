@@ -38,8 +38,7 @@ def route(router, message, profile=None):
     return asyncio.run(router.routing.route("session", "run", message, profile or {}, {}))
 
 
-ORDER = ["block", "confirm", "learning", "quick", "status", "utility", "clarification",
-         "learned", "heuristic", "planner"]
+ORDER = ["block", "confirm", "learning", "clarification", "learned", "heuristic", "planner"]
 
 
 @pytest.mark.parametrize("winner", ORDER)
@@ -55,8 +54,7 @@ def test_first_matching_stage_wins_even_when_all_later_stages_match(router, monk
 
     for name, function in [
         ("block", "detect_blocked_user_request"), ("confirm", "detect_confirmation_required_request"),
-        ("quick", "quick_local_reply"), ("status", "quick_system_status_reply"),
-        ("utility", "quick_utility_reply"), ("clarification", "quick_clarification_reply"),
+        ("clarification", "quick_clarification_reply"),
         ("heuristic", "infer_heuristic_tool_call"),
     ]:
         monkeypatch.setattr(stages_module, function, candidate(name, intent if name == "heuristic" else name))
@@ -89,7 +87,6 @@ def test_first_matching_stage_wins_even_when_all_later_stages_match(router, monk
      "Sicherheitsbestaetigung erforderlich"),
     ("oeffne Safari", {"confirmation_required_patterns": ["Safari"]}, "Sicherheitsbestaetigung erforderlich"),
     ('/learn "fokus" => oeffne Safari', {}, "Lernmodus aktualisiert"),
-    ("hallo jarvis", {}, "Schnellantwort lokal"),
     ("mach mir eine erinnerung", {}, "Rueckfrage fuer praezisen Auftrag"),
 ])
 def test_real_priority_collisions(router, message, safety, detail):
@@ -136,15 +133,14 @@ def test_conversation_is_not_misclassified_as_tool_action(router, message):
     router.planner.assert_not_awaited()
 
 
-@pytest.mark.parametrize("message,answer", [
-    ("Wie spät ist es?", "Uhr"),
-    ("Welches Datum haben wir?", "Heute ist"),
-    ("Bist du da?", "bin da"),
+@pytest.mark.parametrize("message", [
+    "Hallo, Jarvis", "Danke, Jarvis", "Okay", "Bist du da?",
+    "Wie spät ist es?", "Welches Datum haben wir?",
+    "Welche Systemfunktionen kannst du gerade verwenden?",
 ])
-def test_explicit_utility_queries_bypass_planner(router, message, answer):
+def test_normal_conversation_routes_to_llm_not_python_templates(router, message):
     result = route(router, message)
-    assert result.detail == "Utility-Antwort lokal"
-    assert answer.lower() in result.reply.lower()
+    assert result == routing_module.LegacyRoute(message)
     router.planner.assert_not_awaited()
 
 
