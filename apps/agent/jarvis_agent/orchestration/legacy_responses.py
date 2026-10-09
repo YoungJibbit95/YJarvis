@@ -247,18 +247,23 @@ class LegacyResponses:
                 await flush_token_buffer(force=not first_visible_token_sent)
                 first_visible_token_sent = True
 
-            # Ordinary conversation: ONE Ollama streaming call, including
-            # greetings, thanks, readiness and follow-ups. The model may request
-            # only the two declared read-only Toolkit capabilities.
+            # Fact-sensitive turns are a distinct, fully withheld decision
+            # pass: NO WebSocket/TTS tokens before validating a real Toolkit
+            # result. Ordinary chat has NO native tools on offer, so it can
+            # still stream the first token immediately in one model call.
+            # This is an integrity gate, never a Python-written answer.
+            first_call: dict[str, Any] = {
+                "base_url": base_url, "model": model, "messages": messages,
+            }
+            if required_tool is not None:
+                first_call["tools"] = self.read_only_toolkit.descriptions()
+
             requested_tool: ModelToolCall | None = None
             unverified_text = ""
-            async for part in stream_chat(
-                base_url=base_url,
-                model=model,
-                messages=messages,
-                tools=self.read_only_toolkit.descriptions(),
-            ):
+            async for part in stream_chat(**first_call):
                 if isinstance(part, ModelToolCall):
+                    if required_tool is None:
+                        raise LlmError("Unangeforderter Modell-Tool-Aufruf im Gespraech")
                     if requested_tool is not None or assistant_text or unverified_text:
                         raise LlmError("Vermischte oder mehrfache Modell-Tool-Ausgabe")
                     requested_tool = part

@@ -28,13 +28,31 @@ For discovery, each legacy tool is individually classified as registered versus 
 
 Ollama's `/api/chat` documents structured `message.tool_calls` in streaming mode and a follow-up with assistant tool request and tool result ([Ollama Tool calling](https://docs.ollama.com/capabilities/tool-calling)). The configured Qwen2.5 family advertises tool support, but **native behavior on the user's exact local Ollama/model build is NOT MEASURED**.
 
-The normal conversation request includes the two small tool descriptions but otherwise uses **one already-existing streaming Ollama call** with the same persona and session-limited history, including the current user turn exactly once. The first genuine token still streams immediately.
+Normal conversation uses **one existing streaming Ollama call without tool declarations**, with the same persona and session-limited history and the current user turn exactly once. Only an identified live-fact question offers the two small read-only tool declarations; its first pass is withheld until verified. Ordinary chat still streams its first genuine token immediately.
 
 When Ollama *chooses* one of those two functions, the transport captures one native tool call; Python strictly validates name and empty arguments, executes **one** local read-only lookup, feeds the structured JSON result back as an assistant tool call + tool result, then performs exactly **one** additional streaming Ollama call with **no** tools supplied. There are no general tool loops, shell/code execution, extra model selectors on greeting, parallel OS actions, new messages persisted as tool commands, or changed WebSocket/voice events.
 
 A narrowly scoped **integrity guard** recognizes obvious *live* clock/date or toolkit-capability inquiries. It does **not** write the answer or choose the final prose: it only requires the model to request the corresponding real data source. If the model attempts to invent a current time/capability summary without a valid tool call (or mixes unverified text with a tool call), the response fails visibly as an LLM/tool error, rather than publishing a guessed time or unsupported capabilities. A model/runtime that lacks reliable tool calling may therefore be unable to answer these fact questions until the tool path is supported; this is safer than fabricating live observations.
 
 `system.local_datetime` and `toolkit.capability_snapshot` are the ONLY actions allowed for automated read-only execution; no generic `requires_approval=False` bypass was added.
+
+## External review corrections — PR #39
+
+**HIGH-01: verified facts before any WebSocket/TTS tokens.**
+The previous provenance gate recognized only a few time/date/toolkit formulations, so an ordinary native-tool-enabled model stream could publish a false fact before a later valid tool call was seen. The corrected path has two explicitly bounded modes:
+
+- **Fact-sensitive request:** A small conservative intent-to-fact-source guard recognizes both the original variants and natural wording such as "Welche Programme kannst du auf diesem Rechner tatsächlich bedienen?", "Welche Anwendungen stehen dir hier zur Verfügung?", "Was kann dein Toolkit auf diesem Betriebssystem?", "Sag mir die aktuelle lokale Uhrzeit." and "Wie viel Uhr ist gerade auf meinem PC?". It chooses **only which real fact source is mandatory**, never a prewritten Python answer. Only such a first-pass request receives Ollama's native read-only toolkit tool declarations. Its content is withheld from ALL WebSocket token events (and therefore from downstream TTS) until the single requested tool call is validated. Any mixed tool-plus-text, missing tool, wrong tool or invalid argument **fails visibly without publishing its unverified text**. A correct single verified tool call is followed by one existing streamed LLM answer, with actual structured facts in the prompt.
+- **Ordinary chat:** The single streaming model call has **no tools offered**, so no tool-decision round is entered; greeting/thanks/normal conversation still emit their first token early without a second model request. An unsolicited native tool call in this mode is rejected, not executed. This is an integrity boundary, not an attempt to generate smalltalk in Python.
+
+No finite vocabulary gate guarantees classification of every conceivable paraphrase or stops unrelated spontaneous model hallucinations in ordinary discussion. Ambiguous or unrecognized fact questions may still fail model reliability expectations; additional language coverage requires future evidence/review, not a new static-answer table. The safeguard is explicitly an OS-fact provenance gate for recognizable **current/local** time and toolkit availability, not universal factual correctness of the LLM.
+
+**MEDIUM-01: genuine per-implementation backend requirements.**
+Capability snapshot is still derived from the actually registered legacy instances, not a second list of advertised OS tools. Backend requirements are explicitly associated with the existing system tool *classes*: \`open\` for app/URL/Raycast, \`pbpaste\` for clipboard read, \`pbcopy\` for clipboard write; the AppleScript implementations still check \`osascript\`. Unrecognized new system implementation classes are **unavailable until individually verified**. Mac-only OS commands remain unavailable on Windows regardless of which executables happen to be on PATH. Presence of a CLI is only a backend prerequisite, **not proof** of target-app installation or OS permissions. The snapshot never executes legacy tools, imports the isolated V2 Domain or scans the user's installed apps/private files.
+
+**LOW-01: exactly one native read-only model call.**
+A dict-valued \`arguments\` object represents a **complete** native call. More than one complete object is rejected even if its name and argument dict are identical, whether in the same streamed packet or separate packets. One call whose arguments are legitimately split into string fragments continues to be supported; multiple distinct calls or concatenated full JSON documents fail. No model tool call reaches legacy execution.
+
+Focused end-to-end regression tests inspect real \`token\`, \`message\`, \`run_state\` event order: no false text is published before failure; successful verified model answers still stream; a greeting emits its first token before the next model chunk and uses one model call. Full Python, startup, desktop, Windows packaging and Wiki checks are required again on the final correction head.
 
 ## Test cases and performance evidence
 

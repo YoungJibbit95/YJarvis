@@ -11,6 +11,21 @@ from typing import Any, Callable
 import re
 
 from .tools import ToolRegistry
+from .tools.system_tools import (
+    ClipboardReadTool, ClipboardWriteTool, OpenAppTool, OpenUrlTool,
+    RaycastOpenTool, RaycastRunCommandTool,
+)
+
+# Backend prerequisites derived from the registered legacy implementation
+# classes. Unknown future system tool classes intentionally fail closed.
+_SYSTEM_COMMANDS: dict[type, str] = {
+    OpenAppTool: "open",
+    OpenUrlTool: "open",
+    RaycastOpenTool: "open",
+    RaycastRunCommandTool: "open",
+    ClipboardReadTool: "pbpaste",
+    ClipboardWriteTool: "pbcopy",
+}
 
 LOCAL_TIME_TOOL = "system.local_datetime"
 DISCOVERY_TOOL = "toolkit.capability_snapshot"
@@ -27,19 +42,47 @@ TOOL_DESCRIPTIONS: tuple[tuple[str, str], ...] = (
 
 
 def required_live_fact_tool(message: str) -> str | None:
-    """Truth guard, not a canned-answer router: LLM must actually call the tool."""
-    stripped = re.sub(r"(?i)^\s*jarvis[\s,:;-]*", "", message.strip()).strip()
-    lowered = stripped.lower()
-    if re.search(
-        r"\b(?:wie (?:spät|spaet) (?:ist es|haben wir es)|"
-        r"wie (?:viel|viele) uhr|welches datum|welcher tag ist heute|"
-        r"uhrzeit|aktuelles datum|heutiges datum)\b", lowered,
-    ):
+    """Conservative provenance gate; NEVER a Python-generated answer.
+
+    Classify live-clock and current Toolkit availability inquiries broadly
+    enough to withhold unverified model tokens. Normal conversation remains
+    unclassified and streams without a tool-selection round.
+    """
+    lowered = re.sub(r"(?i)^\s*jarvis[\s,:;-]*", "", message.strip()).lower()
+
+    clock_question = re.search(
+        r"\b(?:wie\s+(?:spät|spaet)\s+(?:ist|haben)|"
+        r"wie\s+(?:viel|viele)\s+uhr|"
+        r"welches?\s+datum(?:\s+(?:haben|ist))?|"
+        r"welcher\s+tag\s+ist\s+heute)\b",
+        lowered,
+    )
+    current_word = re.search(
+        r"\b(?:aktuell(?:e|en|er|es)?|heute|heutig(?:e|en|er|es)?|"
+        r"jetzt|gerade|momentan|lokal(?:e|en|er|es)?)\b",
+        lowered,
+    )
+    clock_subject = re.search(r"\b(?:uhr(?:zeit)?|zeit|datum|tag)\b", lowered)
+    if clock_question or (current_word and clock_subject):
         return LOCAL_TIME_TOOL
-    if re.search(
-        r"\b(?:was kannst du|systemfunktionen|welche funktionen|"
-        r"welche fähigkeiten|welche faehigkeiten|welche tools)\b", lowered,
-    ):
+
+    if re.search(r"\bwas\s+kannst\s+du\b", lowered):
+        return DISCOVERY_TOOL
+    subject = re.search(
+        r"\b(?:toolkit|systemfunktionen|systemfähigkeiten|systemfaehigkeiten|"
+        r"funktionen|fähigkeiten|faehigkeiten|tools|werkzeuge|"
+        r"programme|programmen|anwendungen|apps|möglichkeiten|moeglichkeiten)\b",
+        lowered,
+    )
+    local_context = re.search(
+        r"\b(?:du|dir|dein(?:e|em|en|er|es)?|hier|dies(?:em|en|er|es)|"
+        r"rechner|computer|pc|betriebssystem|system|verfügbar|verfuegbar|"
+        r"installiert|nutzen|benutzen|verwenden|bedienen|bedienst|"
+        r"unterstützt|unterstuetzt|kannst|kann|stehen|zur\s+verfügung|"
+        r"zur\s+verfuegung)\b",
+        lowered,
+    )
+    if subject and local_context:
         return DISCOVERY_TOOL
     return None
 
@@ -123,11 +166,17 @@ class ReadOnlyToolkit:
                 "availability_note": "macOS AppleScript; target app and OS permissions not probed",
             }
         if module.endswith(".system_tools"):
-            supported = self._platform == "darwin"
+            command = _SYSTEM_COMMANDS.get(type(registered))
+            supported = self._platform == "darwin" and command is not None
+            available = supported and bool(self._command_exists(command))
             return {
                 "platform_supported": supported,
-                "available": supported and bool(self._command_exists("open")),
-                "availability_note": "macOS open/Apple utilities; destination not verified",
+                "available": available,
+                "backend_requirement": command,
+                "availability_note": (
+                    f"macOS backend requires {command}; target app and OS permissions not probed"
+                    if command else "Unknown macOS backend requirement; fail closed"
+                ),
             }
         if module.endswith(".file_tools"):
             configured = settings.get("allowed_paths", [])

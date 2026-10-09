@@ -33,9 +33,9 @@ def test_normal_conversation_has_one_real_llm_stream_and_no_canned_answer(rig, m
         assert rig.events[-2]["content"] == reply
         assert rig.events[-1]["state"] == "done"
         assert rig.stream.call_count == 1
-        assert set(rig.stream.call_args.kwargs) == {"base_url", "model", "messages", "tools"}
-        tools = rig.stream.call_args.kwargs["tools"]
-        assert {t["function"]["name"] for t in tools} == {LOCAL_TIME_TOOL, DISCOVERY_TOOL}
+        # Ordinary chat must never offer a late native tool call while
+        # publishing already visible text; one streaming model call is enough.
+        assert set(rig.stream.call_args.kwargs) == {"base_url", "model", "messages"}
         prompt = rig.stream.call_args.kwargs["messages"]
         assert prompt[-1] == {"role": "user", "content": message}
         assert [row["content"] for row in prompt if row["role"] == "user"] == [message]
@@ -197,3 +197,135 @@ def test_llm_transport_failure_is_visible_and_never_pretends_success(rig):
     assert rig.events[-1]["state"] == "error"
     assert "offline" in rig.events[-2]["content"]
     rig.tools.execute.assert_not_awaited()
+
+
+REVIEW_FACT_CASES = [
+    ("Welche Programme kannst du auf diesem Rechner tatsächlich bedienen?", DISCOVERY_TOOL),
+    ("Welche Anwendungen stehen dir hier zur Verfügung?", DISCOVERY_TOOL),
+    ("Was kann dein Toolkit auf diesem Betriebssystem?", DISCOVERY_TOOL),
+    ("Sag mir die aktuelle lokale Uhrzeit.", LOCAL_TIME_TOOL),
+    ("Wie viel Uhr ist gerade auf meinem PC?", LOCAL_TIME_TOOL),
+]
+
+
+@pytest.mark.parametrize("utterance,expected_tool", REVIEW_FACT_CASES)
+def test_review_fact_phrasings_use_withheld_first_pass_and_verified_final_model(
+    rig, utterance, expected_tool,
+):
+    queried = []
+    async def model(**kwargs):
+        queried.append(kwargs)
+        if "tools" in kwargs:
+            assert len([e for e in rig.events if e["event"] == "token"]) == 0
+            yield ModelToolCall(expected_tool, {})
+        else:
+            tool_data = json.loads(kwargs["messages"][-1]["content"])
+            assert kwargs["messages"][-1]["tool_name"] == expected_tool
+            assert len([e for e in rig.events if e["event"] == "token"]) == 0
+            if expected_tool == LOCAL_TIME_TOOL:
+                assert tool_data["capability"] == LOCAL_TIME_TOOL
+                assert "utc_offset" in tool_data and "local_iso" in tool_data
+            else:
+                assert tool_data["discovery_does_not_grant_approval"] is True
+                assert tool_data["v2_catalog"]["available_for_execution"] == []
+            yield "Bestätigte Modellantwort."
+
+    rig.stream.side_effect = model
+
+    async def scenario():
+        await rig.service.start_run("session", "run", utterance)
+        assert len(queried) == 2
+        assert event_order(rig) == ["received", "thinking", "token", "message", "done"]
+        assert rig.events[2]["token"] == "Bestätigte Modellantwort."
+        assert rig.events[-2]["content"] == "Bestätigte Modellantwort."
+        assert await rig.db.list_pending_approvals() == []
+        rig.tools.execute.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("utterance,expected_tool", REVIEW_FACT_CASES)
+def test_review_fabricated_first_stream_then_tool_never_publishes_unverified_tokens(
+    rig, utterance, expected_tool,
+):
+    async def mixed_model(**kwargs):
+        assert "tools" in kwargs
+        yield "Falsch: Alles ist installiert und es ist 03:30 Uhr."
+        # A subsequent tool call must NOT make the earlier text visible to
+        # Chat, WebSocket or TTS (which consumes the same token stream).
+        yield ModelToolCall(expected_tool, {})
+
+    rig.stream.side_effect = mixed_model
+
+    async def scenario():
+        await rig.service.start_run("session", "run", utterance)
+        assert event_order(rig) == ["received", "thinking", "message", "error"]
+        assert [e for e in rig.events if e["event"] == "token"] == []
+        assert "Falsch" not in rig.events[-2]["content"]
+        assert rig.stream.call_count == 1
+        rig.tools.execute.assert_not_awaited()
+        assert await rig.db.list_pending_approvals() == []
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("utterance,correct,wrong", [
+    ("Welche Anwendungen stehen dir hier zur Verfügung?", DISCOVERY_TOOL, LOCAL_TIME_TOOL),
+    ("Sag mir die aktuelle lokale Uhrzeit.", LOCAL_TIME_TOOL, DISCOVERY_TOOL),
+])
+def test_wrong_fact_tool_rejected_without_earlier_ws_tokens(rig, utterance, correct, wrong):
+    async def wrong_model(**kwargs):
+        assert {t["function"]["name"] for t in kwargs["tools"]} == {
+            LOCAL_TIME_TOOL, DISCOVERY_TOOL,
+        }
+        yield ModelToolCall(wrong, {})
+
+    rig.stream.side_effect = wrong_model
+
+    async def scenario():
+        await rig.service.start_run("session", "run", utterance)
+        assert event_order(rig) == ["received", "thinking", "message", "error"]
+        assert not [e for e in rig.events if e["event"] == "token"]
+        assert "Falsche Faktenquelle" in rig.events[-2]["content"]
+        rig.tools.execute.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("utterance,expected_tool", REVIEW_FACT_CASES)
+def test_factual_question_without_tool_fails_before_any_ws_token(rig, utterance, expected_tool):
+    rig.set_stream(["Ich behaupte ungeprüft, dass alles funktioniert."])
+
+    async def scenario():
+        await rig.service.start_run("session", "run", utterance)
+        assert event_order(rig) == ["received", "thinking", "message", "error"]
+        assert not any(event["event"] == "token" for event in rig.events)
+        assert rig.stream.call_count == 1
+        assert "ungeprüft" not in rig.events[-2]["content"]
+        rig.tools.execute.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_ordinary_greeting_releases_first_token_before_second_model_chunk(rig):
+    async def model(**kwargs):
+        assert "tools" not in kwargs
+        yield "Hallo!"
+        # The first real WebSocket token must be visible before Ollama gives
+        # the next one. No extra classification/model round trip is allowed.
+        assert [event["token"] for event in rig.events
+                if event["event"] == "token"] == ["Hallo!"]
+        yield " Willkommen zurück."
+
+    rig.stream.side_effect = model
+
+    async def scenario():
+        await rig.service.start_run("session", "run", "Hallo, Jarvis")
+        assert rig.stream.call_count == 1
+        assert event_order(rig) == [
+            "received", "thinking", "token", "token", "message", "done",
+        ]
+        assert rig.events[-2]["content"] == "Hallo! Willkommen zurück."
+        rig.tools.execute.assert_not_awaited()
+
+    asyncio.run(scenario())

@@ -81,14 +81,17 @@ def _single_model_tool_call(chunks: list[Any]) -> ModelToolCall:
         raise LlmError("Invalid or multiple tool names")
     if not arguments:
         raise LlmError("Missing tool arguments")
+    # A Python dict is already a complete Ollama function-call payload.
+    # Two dict payloads, even identical, mean TWO full calls, never fragments.
+    # Only string argument pieces may be combined into one fragmented call.
+    if len(arguments) > 1 and any(type(part) is dict for part in arguments):
+        raise LlmError("Multiple complete tool calls are not permitted")
     if len(arguments) == 1:
         arg = arguments[0]
     elif all(isinstance(part, str) for part in arguments):
         arg = "".join(arguments)
-    elif all(part == arguments[0] for part in arguments):
-        arg = arguments[0]
     else:
-        raise LlmError("Inconsistent tool arguments")
+        raise LlmError("Inconsistent tool argument fragments")
 
     if isinstance(arg, str):
         if len(arg) > 1024:

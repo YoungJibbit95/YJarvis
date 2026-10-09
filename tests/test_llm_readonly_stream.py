@@ -96,6 +96,7 @@ def test_streaming_native_tool_call_produces_validated_event_not_text(monkeypatc
 
 
 @pytest.mark.parametrize("calls", [
+    [tool_call("system.local_datetime", {}), tool_call("system.local_datetime", {})],
     [tool_call("open_app", {"app_name": "Safari"}), tool_call("system.local_datetime", {}, 1)],
     [tool_call("system.local_datetime", {"execute": True}, 2)],
     [{"type": "function", "function": {"arguments": {}}}],
@@ -127,3 +128,35 @@ def test_streaming_fragmented_single_tool_arguments_preserves_exact_identity(mon
         )]
 
     assert asyncio.run(scenario()) == [ModelToolCall("system.local_datetime", {})]
+
+
+def test_duplicate_full_tool_calls_in_separate_stream_chunks_are_rejected(monkeypatch):
+    make_client(monkeypatch, [
+        packet(tool_calls=[tool_call("system.local_datetime", {})]),
+        packet(tool_calls=[tool_call("system.local_datetime", {})]),
+        packet(done=True),
+    ])
+
+    async def scenario():
+        return [part async for part in llm.stream_chat(
+            base_url="http://localhost:11434", model="test", messages=[], tools=[],
+        )]
+
+    with pytest.raises(LlmError, match="Multiple complete tool calls"):
+        asyncio.run(scenario())
+
+
+def test_full_tool_call_followed_by_second_distinct_call_is_rejected(monkeypatch):
+    make_client(monkeypatch, [
+        packet(tool_calls=[tool_call("system.local_datetime", {})]),
+        packet(tool_calls=[tool_call("toolkit.capability_snapshot", {})]),
+        packet(done=True),
+    ])
+
+    async def scenario():
+        return [part async for part in llm.stream_chat(
+            base_url="http://localhost:11434", model="test", messages=[], tools=[],
+        )]
+
+    with pytest.raises(LlmError):
+        asyncio.run(scenario())

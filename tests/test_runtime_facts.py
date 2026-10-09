@@ -110,7 +110,13 @@ def test_snapshot_uses_runtime_and_actual_command_availability_not_catalog_promi
     data = toolkit.capability_snapshot(settings={"allowed_paths": ["/tmp/project"]})
     registered = {row["name"]: row for row in data["legacy_registered"]}
     assert registered["open_app"]["available"]
+    assert registered["open_app"]["backend_requirement"] == "open"
     assert registered["reminder_list"]["available"]
+    assert registered["clipboard_read"]["backend_requirement"] == "pbpaste"
+    assert not registered["clipboard_read"]["available"]
+    assert registered["clipboard_write"]["backend_requirement"] == "pbcopy"
+    assert not registered["clipboard_write"]["available"]
+    assert "target app and OS permissions not probed" in registered["open_app"]["availability_note"]
     assert registered["file_read"]["available"]
     assert registered["file_read"]["requires_approval"]
     assert "notes.search" in CAPABILITY_CATALOG
@@ -130,6 +136,14 @@ def test_snapshot_uses_runtime_and_actual_command_availability_not_catalog_promi
     ("Was kannst du?", DISCOVERY_TOOL),
     ("Welche Systemfunktionen kannst du gerade verwenden?", DISCOVERY_TOOL),
     ("Welche Funktionen hast du?", DISCOVERY_TOOL),
+    ("Welche Programme kannst du auf diesem Rechner tatsächlich bedienen?", DISCOVERY_TOOL),
+    ("Welche Anwendungen stehen dir hier zur Verfügung?", DISCOVERY_TOOL),
+    ("Was kann dein Toolkit auf diesem Betriebssystem?", DISCOVERY_TOOL),
+    ("Sag mir die aktuelle lokale Uhrzeit.", LOCAL_TIME_TOOL),
+    ("Wie viel Uhr ist gerade auf meinem PC?", LOCAL_TIME_TOOL),
+    ("Kannst du mir sagen, welche Apps hier verfügbar sind?", DISCOVERY_TOOL),
+    ("Was unterstützt dein Toolkit?", DISCOVERY_TOOL),
+    ("Welche Programme sind hier installiert?", DISCOVERY_TOOL),
     ("Hallo, Jarvis", None),
     ("Danke, Jarvis", None),
     ("Warum ist Zeit relativ?", None),
@@ -137,3 +151,55 @@ def test_snapshot_uses_runtime_and_actual_command_availability_not_catalog_promi
 ])
 def test_live_fact_guard_prevents_fabricated_time_without_canned_answers(text, name):
     assert required_live_fact_tool(text) == name
+
+
+@pytest.mark.parametrize("available_commands,read_expected,write_expected", [
+    ({"open"}, False, False),
+    ({"open", "pbpaste"}, True, False),
+    ({"open", "pbcopy"}, False, True),
+    ({"open", "pbpaste", "pbcopy"}, True, True),
+    (set(), False, False),
+])
+def test_clipboard_availability_checks_actual_backend_binary(
+    available_commands, read_expected, write_expected,
+):
+    registry = ToolRegistry()
+    registry.execute = AsyncMock(side_effect=AssertionError("Discovery cannot execute"))
+    consulted = []
+
+    def which(command):
+        consulted.append(command)
+        return "/usr/bin/" + command if command in available_commands else None
+
+    toolkit = ReadOnlyToolkit(registry, platform_name="darwin", command_exists=which)
+    rows = {row["name"]: row for row in toolkit.capability_snapshot(settings={})["legacy_registered"]}
+    assert rows["open_app"]["available"] == ("open" in available_commands)
+    assert rows["open_url"]["available"] == ("open" in available_commands)
+    assert rows["clipboard_read"]["available"] is read_expected
+    assert rows["clipboard_write"]["available"] is write_expected
+    assert rows["clipboard_read"]["backend_requirement"] == "pbpaste"
+    assert rows["clipboard_write"]["backend_requirement"] == "pbcopy"
+    assert "OS permissions not probed" in rows["clipboard_read"]["availability_note"]
+    assert "target app and OS permissions not probed" in rows["open_url"]["availability_note"]
+    assert "pbpaste" in consulted and "pbcopy" in consulted
+    registry.execute.assert_not_awaited()
+
+
+def test_windows_clipboard_and_mac_only_tools_are_never_advertised_available():
+    checked = []
+
+    def which(command):
+        checked.append(command)
+        return "C:/fake/" + command
+
+    registry = ToolRegistry()
+    registry.execute = AsyncMock(side_effect=AssertionError("Discovery cannot execute"))
+    toolkit = ReadOnlyToolkit(registry, platform_name="win32", command_exists=which)
+    rows = {row["name"]: row for row in toolkit.capability_snapshot(settings={})["legacy_registered"]}
+    for name in ("clipboard_read", "clipboard_write", "open_url", "open_app",
+                 "raycast_open", "reminder_list", "notes_search"):
+        assert rows[name]["registered"] and rows[name]["requires_approval"]
+        assert not rows[name]["platform_supported"]
+        assert not rows[name]["available"]
+    assert checked == []
+    registry.execute.assert_not_awaited()
