@@ -14,6 +14,7 @@ from .accelerator_profile import AcceleratorProfile
 from .setup_accelerators import inspect_accelerators
 from .setup_hardware import inspect_hardware
 from .setup_readiness import SetupStatus, inspect_setup, ComponentStatus, combine_status
+from .setup_inventory import inspect_model_inventory
 
 
 def create_setup_router(
@@ -33,6 +34,15 @@ def create_setup_router(
     def setup_hardware(response: Response) -> HardwareProfile:
         response.headers["Cache-Control"] = "no-store"
         return inspect_hardware(runtime_dir)
+
+    @router.get("/inventory")
+    async def setup_inventory(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return await inspect_model_inventory(
+            await read_settings(),
+            runtime_dir if runtime_dir is not None else default_whisper_model.parent.parent,
+            default_whisper_model,
+        )
 
     @router.get("/models", response_model=ModelCatalog)
     async def setup_models() -> ModelCatalog:

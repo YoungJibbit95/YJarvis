@@ -1,10 +1,11 @@
-const { app, BrowserWindow, protocol, net, dialog, Menu, ipcMain } = require("electron");
+const { app, BrowserWindow, protocol, net, dialog, Menu, ipcMain, session, systemPreferences } = require("electron");
 const path = require("path");
 const { pathToFileURL } = require("node:url");
 const { OwnedProcesses, startBackend, waitForHealth, ensureOllama, ollamaUrl } = require(app.isPackaged
   ? path.join(process.resourcesPath, "startup.cjs")
   : "../../../scripts/startup.cjs");
 const { startPackagedBackend, rendererFile } = require("./packaged.cjs");
+const { installMicrophonePermissions, isTrustedRenderer, nativeMicStatus } = require("./microphone-permissions.cjs");
 
 protocol.registerSchemesAsPrivileged([{
   scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
@@ -30,6 +31,16 @@ ipcMain.on("jarvis:window-control", (event, action) => {
 
 const OPEN_DEVTOOLS = process.env.JARVIS_OPEN_DEVTOOLS === "1";
 const ENABLE_AGENT_RELOAD = process.env.JARVIS_AGENT_RELOAD === "1";
+
+ipcMain.handle("jarvis:microphone-permission-status", (event) => {
+  const frame = event.senderFrame;
+  if (!frame || frame !== event.sender.mainFrame ||
+      !isTrustedRenderer(event.sender, frame.url, app.isPackaged, () => BrowserWindow.getAllWindows())) {
+    return "unknown";
+  }
+  // Windows' status alone never proves the audio device can be opened.
+  return nativeMicStatus(process.platform, systemPreferences);
+});
 
 const backendOwner = new OwnedProcesses();
 let backendStopped = false;
@@ -76,6 +87,10 @@ process.on("SIGINT", () => app.quit());
 process.on("SIGTERM", () => app.quit());
 
 app.whenReady().then(async () => {
+  installMicrophonePermissions(session.defaultSession, {
+    packaged: app.isPackaged, platform: process.platform, systemPreferences,
+    getWindows: () => BrowserWindow.getAllWindows()
+  });
   const projectRoot = path.resolve(__dirname, "../../..");
   try {
     if (app.isPackaged) {

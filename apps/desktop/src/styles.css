@@ -223,3 +223,37 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .voice-reliability-panel li > span { flex: 1 1 180px; overflow-wrap: anywhere; color: var(--yj-text); }
 .voice-reliability-panel li > small { flex: 1 1 100px; }
 .voice-reliability-panel button { min-height: 26px; font-size: 11px; padding: 3px 8px; }
+
+
+/* YJUX-01: concise, accessible settings modes; the meter displays actual RMS only. */
+.settings-nav { display: flex; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--yj-border); padding: 4px 0 14px; }
+.settings-nav button { border-radius: 12px; font-size: 12px; min-height: 37px; padding: 8px 12px; transition: background .18s ease, border-color .18s ease; }
+.settings-nav button.settings-nav-active { background: #1c5160; border-color: var(--yj-accent); color: var(--yj-text); }
+.settings-experience { padding-top: 14px; }
+.settings-focus { max-width: 920px; display: grid; gap: 16px; padding: 18px 0 26px; }
+.settings-focus h3 { font: 400 26px var(--yj-font-display); }
+.settings-focus h4 { font: 500 17px var(--yj-font-body); }
+.settings-focus > p, .settings-hint, .settings-focus label, .settings-experience > p { font-size: 12px; line-height: 1.7; color: var(--yj-text-muted); }
+.settings-focus label { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.settings-focus input, .settings-focus select { width: 100%; max-width: 700px; }
+.settings-inline-heading { display: flex; gap: 16px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+.settings-pill { color: var(--yj-accent); border: 1px solid var(--yj-border-lit); background: #389bb011; padding: 5px 10px; border-radius: 999px; font-size: 11px; }
+.settings-subsection { padding: 18px; border: 1px solid var(--yj-border); border-radius: 16px; background: #0a1c282e; display: grid; gap: 12px; }
+.settings-installer-area { border-top: 1px solid var(--yj-border); padding: 20px 0 10px; display: grid; gap: 14px; }
+.microphone-settings { display: grid; gap: 12px; padding: 20px; background: linear-gradient(125deg,#1433454d,transparent); border: 1px solid var(--yj-border-lit); border-radius: 18px; }
+.microphone-settings select { width: 100%; }
+.mic-test-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.mic-test-actions button { min-height: 36px; }
+.mic-meter { height: 13px; border-radius: 999px; border: 1px solid var(--yj-border); background: #0b1725; overflow: hidden; }
+.mic-meter-fill { height: 100%; background: linear-gradient(90deg,#417f92,var(--yj-accent)); transition: width 90ms linear; }
+@media (max-width: 720px) {
+  .settings-nav { gap: 6px; }
+  .settings-nav button { flex: 1 1 145px; }
+  .settings-inline-heading { align-items: stretch; }
+  .settings-focus .form-grid { grid-template-columns: 1fr; }
+  .settings-footer { align-items: start; flex-wrap: wrap; }
+  .microphone-settings { padding: 13px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-nav button, .mic-meter-fill { transition: none; }
+}

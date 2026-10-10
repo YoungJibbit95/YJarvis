@@ -32,7 +32,8 @@ import { AppFeedback, type ConnectionState, type FailureKind, type Failures } fr
 import { ActionReview } from "./app/ActionReview";
 import { SetupNotice } from "./setup/SetupStatusView";
 import type { SetupCheck } from "./setup/types";
-import { GuidedInstaller } from "./setup/GuidedInstaller";
+import { IntelligentSettings } from "./settings/IntelligentSettings";
+import { microphoneConstraints, microphoneErrorMessage, persistMicrophonePreference, readMicrophonePreference } from "./voice/microphoneDevices";
 import { ChatSubmissionError } from "./api";
 import {
   TerminalRunHistory,
@@ -476,6 +477,9 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
   const [settingsDraft, setSettingsDraft] = useState<JarvisSettings>(DEFAULT_SETTINGS);
   const [allowlistInput, setAllowlistInput] = useState("");
   const [sayVoices, setSayVoices] = useState<string[]>([]);
+  const [selectedMicrophoneId, setSelectedMicrophoneId] = useState(readMicrophonePreference);
+
+  useEffect(() => { persistMicrophonePreference(selectedMicrophoneId); }, [selectedMicrophoneId]);
 
   const [entities, setEntities] = useState<SmartHomeEntity[]>([]);
 
@@ -1261,12 +1265,14 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     let context: AudioContext | null = null;
     try {
       setVoiceStage("Mikrofon wird initialisiert");
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1, sampleRate: 48000, echoCancellation: true,
-          noiseSuppression: true, autoGainControl: true
+      stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints(selectedMicrophoneId));
+      stream.getAudioTracks?.().forEach(track => track.addEventListener?.("ended", () => {
+        if (voiceModeEnabledRef.current && mediaStreamRef.current === stream) {
+          stopVoiceModeInternal({ updateStatus: true });
+          reportFailure("voice", "Mikrofon wurde getrennt",
+            "Die Audioverbindung wurde unterbrochen. Aufnahme wird sicher beendet; Gerät in Einstellungen prüfen.");
         }
-      });
+      }));
       if (voiceDisposedRef.current || !chatAvailableRef.current || attempt !== voiceStartGenerationRef.current) return;
 
       const browserWindow = window as typeof window & { webkitAudioContext?: typeof AudioContext };
@@ -1297,7 +1303,8 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       if (!voiceDisposedRef.current && attempt === voiceStartGenerationRef.current) {
         stopVoiceModeInternal({ updateStatus: false });
         setVoiceStage("Mikrofonfehler · Einstellungen prüfen");
-        reportFailure("voice", "Sprachmodus konnte nicht gestartet werden", error);
+        reportFailure("voice", "Sprachmodus konnte nicht gestartet werden",
+          microphoneErrorMessage(error, window.jarvisDesktop?.platform || ""));
       }
     } finally {
       // A failed or cancelled start owns its local stream/context until released.
@@ -1948,212 +1955,42 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
   }
 
   function renderSettingsTab() {
-    const isSayEngine = settingsDraft.tts_engine.trim().toLowerCase() === "say";
-    const currentVoiceMissingFromList =
-      settingsDraft.tts_voice.trim().length > 0 && !sayVoices.includes(settingsDraft.tts_voice);
-
-    return (
-      <section className="panel settings">
-        <header className="panel-header">
-          <div><p className="eyebrow">Dein Jarvis, deine Einstellungen</p><h2>Einstellungen</h2></div>
-          <p>Änderungen gelten erst nach dem Speichern.</p>
-        </header>
-        <div className="panel-scroll settings-scroll">
-          <GuidedInstaller onConfigured={fields => {
-            void fetchSettings().then(latest => {
-              const changed = Object.fromEntries(fields.map(key => [key, latest[key]])) as Partial<JarvisSettings>;
-              setSettings(latest); setSettingsDraft(draft => ({ ...draft, ...changed }));
-              void onRecheckSetup();
-            }).catch(() => setStatus("Einrichtung gespeichert; Einstellungen konnten nicht neu geladen werden."));
-          }} />
-
-          <section className="settings-section">
-            <header><h3>Allgemein</h3><p>Die Sprache deines Assistenten.</p></header>
-            <div>
-              <div className="form-grid">
-                <label>
-                  Sprache
-                  <input
-                    value={settingsDraft.language}
-                    onChange={(event) => setSettingsDraft((previous) => ({ ...previous, language: event.target.value }))}
-                  />
-                </label>
-              </div>
-            </div>
-          </section>
-
-          <section className="settings-section">
-            <header><h3>Modelle</h3><p>Das konfigurierte Chat-Modell und seine lokale Verbindung.</p></header>
-            <div>
-              <div className="form-grid">
-                <label>
-                  Modell
-                  <input
-                    value={settingsDraft.model_name}
-                    onChange={(event) => setSettingsDraft((previous) => ({ ...previous, model_name: event.target.value }))}
-                  />
-                </label>
-              </div>
-              <details className="technical-details">
-                <summary>Modell-Verbindung und Dateien</summary>
-                <div className="form-grid">
-                  <label>
-                    Ollama URL
-                    <input
-                      value={settingsDraft.ollama_base_url}
-                      onChange={(event) => setSettingsDraft((previous) => ({ ...previous, ollama_base_url: event.target.value }))}
-                    />
-                  </label>
-
-                  <label>
-                    Whisper Modellpfad
-                    <input
-                      value={settingsDraft.whisper_model_path}
-                      onChange={(event) => setSettingsDraft((previous) => ({ ...previous, whisper_model_path: event.target.value }))}
-                    />
-                  </label>
-
-                  <label>
-                    Whisper Binary
-                    <input
-                      value={settingsDraft.whisper_binary}
-                      onChange={(event) => setSettingsDraft((previous) => ({ ...previous, whisper_binary: event.target.value }))}
-                    />
-                  </label>
-                </div>
-              </details>
-            </div>
-          </section>
-
-          <section className="settings-section">
-            <header><h3>Stimme</h3><p>Stimme und Aussprache an deine Vorlieben anpassen.</p></header>
-            <div>
-              <div className="form-grid">
-                <label>
-                  TTS Voice
-                  {isSayEngine ? (
-                    <div className="tts-voice-row">
-                      <select
-                        value={settingsDraft.tts_voice}
-                        onChange={(event) =>
-                          setSettingsDraft((previous) => ({ ...previous, tts_voice: event.target.value }))
-                        }
-                      >
-                        {currentVoiceMissingFromList ? (
-                          <option value={settingsDraft.tts_voice}>
-                            {settingsDraft.tts_voice} (aktuell)
-                          </option>
-                        ) : null}
-                        {sayVoices.map((voice) => (
-                          <option key={voice} value={voice}>
-                            {voice}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => {
-                          refreshAudioVoices().catch((error) => reportFailure("voice", "Stimmen konnten nicht geladen werden", error));
-                        }}
-                      >
-                        Neu laden
-                      </button>
-                    </div>
-                  ) : (
-                    <input
-                      value={settingsDraft.tts_voice}
-                      onChange={(event) => setSettingsDraft((previous) => ({ ...previous, tts_voice: event.target.value }))}
-                    />
-                  )}
-                </label>
-
-                <label>
-                  say Rate (WPM)
-                  <input
-                    type="number"
-                    min={80}
-                    max={420}
-                    value={settingsDraft.say_rate_wpm}
-                    onChange={(event) =>
-                      setSettingsDraft((previous) => ({
-                        ...previous,
-                        say_rate_wpm: Number.isFinite(Number(event.target.value))
-                          ? Number(event.target.value)
-                          : previous.say_rate_wpm
-                      }))
-                    }
-                  />
-                </label>
-
-                <label>
-                  Sir Aussprache (TTS)
-                  <input
-                    value={settingsDraft.tts_sir_pronunciation}
-                    onChange={(event) =>
-                      setSettingsDraft((previous) => ({ ...previous, tts_sir_pronunciation: event.target.value }))
-                    }
-                    placeholder="Sör"
-                  />
-                </label>
-              </div>
-              <details className="technical-details">
-                <summary>Sprachausgabe · Backend und Datei</summary>
-                <div className="form-grid">
-                  <label>
-                    TTS Engine
-                    <input
-                      value={settingsDraft.tts_engine}
-                      onChange={(event) => setSettingsDraft((previous) => ({ ...previous, tts_engine: event.target.value }))}
-                    />
-                  </label>
-
-                  <label>
-                    Piper Modellpfad
-                    <input
-                      value={settingsDraft.tts_model_path}
-                      onChange={(event) => setSettingsDraft((previous) => ({ ...previous, tts_model_path: event.target.value }))}
-                    />
-                  </label>
-                </div>
-              </details>
-            </div>
-          </section>
-
-          <div className="allowlist settings-section">
-            <header><h3>Dateizugriff</h3><p>Erlaubte Pfade bleiben sichtbar und unter deiner Kontrolle.</p></header>
-            <div>
-            <div className="allowlist-add">
-              <input
-                value={allowlistInput}
-                onChange={(event) => setAllowlistInput(event.target.value)}
-                aria-label="Erlaubten Pfad hinzufügen"
-                placeholder="Vollständiger Pfad zu einem erlaubten Ordner"
-              />
-              <button onClick={addAllowlistPath}>Hinzufügen</button>
-            </div>
-
-            <ul>
-              {settingsDraft.allowed_paths.map((path) => (
-                <li key={path}>
-                  <code>{path}</code>
-                  <button className="secondary" onClick={() => removeAllowlistPath(path)}>
-                    Entfernen
-                  </button>
-                </li>
-              ))}
-              {!settingsDraft.allowed_paths.length ? <li className="empty">Keine Allowlist-Pfade gesetzt.</li> : null}
-            </ul>
-            </div>
-          </div>
-        </div>
-
-        <div className="settings-footer">
-          <button onClick={handleSaveSettings}>Speichern</button>
-          <span>Aktiv: {settings.model_name}</span>
-        </div>
-      </section>
-    );
+    return <IntelligentSettings
+      settings={settings}
+      draft={settingsDraft}
+      setDraft={setSettingsDraft}
+      setupCheck={setupCheck}
+      sayVoices={sayVoices}
+      onRefreshVoices={refreshAudioVoices}
+      onSave={handleSaveSettings}
+      onConfigured={(fields) => {
+        void fetchSettings().then(latest => {
+          const changed = Object.fromEntries(fields.map(key => [key, latest[key]])) as Partial<JarvisSettings>;
+          setSettings(latest);
+          // Only fields explicitly written by SetupInstaller merge into the
+          // draft. Preserve all unrelated dirty advanced/security settings.
+          setSettingsDraft(draft => ({ ...draft, ...changed }));
+          void onRecheckSetup();
+        }).catch(() => setStatus("Installation erfolgreich; Einstellungen bitte neu laden."));
+      }}
+      selectedMicId={selectedMicrophoneId}
+      onSelectMic={id => {
+        if (voiceModeEnabledRef.current || voiceStartInProgressRef.current) {
+          stopVoiceModeInternal({ updateStatus: true });
+        }
+        setSelectedMicrophoneId(id);
+      }}
+      voiceActive={voiceModeEnabled}
+      onMicUnavailable={() => {
+        if (voiceModeEnabledRef.current || voiceStartInProgressRef.current) {
+          stopVoiceModeInternal({ updateStatus: true });
+        }
+      }}
+      allowlistInput={allowlistInput}
+      onAllowlistInput={setAllowlistInput}
+      onAddPath={addAllowlistPath}
+      onRemovePath={removeAllowlistPath}
+    />;
   }
 
   function renderSmartHomeTab() {
