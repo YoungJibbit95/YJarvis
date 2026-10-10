@@ -19,7 +19,7 @@ function readableText(node) {
 }
 
 async function rig({ selectedId = "", sttAvailable = false, level = 175,
-  getUserMediaError = null, recorderError = false, emptyBlob = false } = {}) {
+  getUserMediaError = null, recorderError = false, emptyBlob = false, recorderMime = "audio/webm" } = {}) {
   const slots = [], effects = [], recorders = [], tracks = [], contexts = [], calls = [], transcripts = [];
   const listeners = new Map(), timers = new Map();
   let cursor = 0, dirty = true, tree, timerId = 0, devices = [
@@ -60,7 +60,7 @@ async function rig({ selectedId = "", sttAvailable = false, level = 175,
   };
   class Recorder {
     state = "inactive";
-    mimeType = "audio/webm";
+    mimeType = recorderMime;
     constructor(stream) { recorders.push(this); }
     start() {
       if (recorderError) throw new Error("MediaRecorder.start failed");
@@ -93,7 +93,10 @@ async function rig({ selectedId = "", sttAvailable = false, level = 175,
     removeEventListener(name) { listeners.delete(name); }
   };
   const window = {
-    AudioContext: Context, jarvisDesktop: { platform: "win32", microphoneStatus: async () => "unknown" },
+    AudioContext: Context, jarvisDesktop: {
+      platform: "win32", microphoneStatus: async () => "not-determined",
+      openMicrophonePrivacySettings: async () => true
+    },
     setInterval(callback) { const id = ++timerId; timers.set(id, callback); return id; },
     clearInterval(id) { timers.delete(id); }
   };
@@ -210,4 +213,50 @@ test("stop/unmount releases tracks and never permits simultaneous recorders", as
   h.unmount();
   assert.equal(h.tracks[0].stopped, true);
   assert.equal(h.timers.size, 0);
+});
+
+
+test("explicit permission request releases capture immediately without Recorder or Whisper", async () => {
+  const h = await rig({ sttAvailable: false, selectedId: "mic-2" });
+  assert.match(h.status(), /Noch nicht angefragt/);
+  h.button("Mikrofonzugriff anfordern").props.onClick();
+  await h.settle();
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].audio.deviceId.exact, "mic-2");
+  assert.equal(h.calls[0].video, false);
+  assert.equal(h.tracks[0].stopped, true);
+  assert.equal(h.recorders.length, 0);
+  assert.equal(h.transcripts.length, 0);
+  assert.match(h.visibleText(), /Mikrofon erfolgreich geöffnet/);
+});
+
+test("native OS recovery is explicit and never claims hardware access from status alone", async () => {
+  const h = await rig({ sttAvailable: false });
+  assert.match(h.visibleText(), /Noch nicht angefragt/);
+  h.button("Betriebssystem-Einstellungen öffnen").props.onClick();
+  await h.settle();
+  assert.match(h.visibleText(), /Systemeinstellungen geöffnet/);
+  h.button("Berechtigung erneut prüfen").props.onClick();
+  await h.settle();
+  assert.equal(h.calls.length, 0, "read-only recheck must never start a microphone");
+});
+
+test("MediaRecorder.start failure closes context/tracks and allows retry", async () => {
+  const h = await rig({ recorderError: true });
+  h.button("Mikrofon testen").props.onClick();
+  await h.settle();
+  assert.match(h.visibleText(), /MediaRecorder.start failed/);
+  assert.equal(h.tracks[0].stopped, true);
+  assert.equal(h.contexts[0].closed, true);
+  assert.equal(h.timers.size, 0);
+});
+
+test("Whisper rejects unsupported recorder MIME without submitting chat", async () => {
+  const h = await rig({ sttAvailable: true, recorderMime: "application/octet-stream" });
+  h.button("Spracherkennung testen").props.onClick();
+  await h.settle();
+  h.tick(); await h.settle();
+  h.button("Test beenden").props.onClick(); await h.settle();
+  assert.match(h.visibleText(), /nicht als kompatibel bestätigt/);
+  assert.equal(h.transcripts.length, 0);
 });

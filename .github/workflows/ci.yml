@@ -96,10 +96,11 @@ jobs:
       - name: Typecheck the renderer and its shared types
         run: npm run typecheck
       - name: Validate setup DTOs and read-only presentation
-        run: node --test tests/desktop/model-catalog.test.cjs tests/desktop/hardware-profile.test.cjs tests/desktop/accelerator-profile.test.cjs tests/desktop/product-presentation.test.cjs tests/desktop/guided-setup.test.cjs tests/desktop/voice-reliability.test.cjs tests/desktop/voice-pipeline.test.cjs tests/desktop/microphone-permissions.test.cjs tests/desktop/microphone-devices.test.cjs tests/desktop/microphone-settings.test.cjs tests/desktop/model-inventory.test.cjs
+        run: node --test tests/desktop/model-catalog.test.cjs tests/desktop/hardware-profile.test.cjs tests/desktop/accelerator-profile.test.cjs tests/desktop/product-presentation.test.cjs tests/desktop/guided-setup.test.cjs tests/desktop/voice-reliability.test.cjs tests/desktop/voice-pipeline.test.cjs tests/desktop/microphone-permissions.test.cjs tests/desktop/microphone-devices.test.cjs tests/desktop/microphone-settings.test.cjs tests/desktop/model-inventory.test.cjs tests/desktop/microphone-recovery.test.cjs tests/desktop/microphone-strict-react.test.cjs
       - name: Syntax-check Electron entry points without launching the app
         run: |
           node --check apps/desktop/electron/main.cjs
+          node --check apps/desktop/electron/microphone-recovery.cjs
           node --check apps/desktop/electron/preload.cjs
 
   desktop-build:
@@ -195,9 +196,11 @@ jobs:
       - name: Typecheck the renderer and its shared types
         run: npm run typecheck
       - name: Validate setup DTOs and read-only presentation
-        run: node --test tests/desktop/model-catalog.test.cjs tests/desktop/hardware-profile.test.cjs tests/desktop/accelerator-profile.test.cjs tests/desktop/product-presentation.test.cjs tests/desktop/guided-setup.test.cjs tests/desktop/voice-reliability.test.cjs tests/desktop/voice-pipeline.test.cjs tests/desktop/microphone-permissions.test.cjs tests/desktop/microphone-devices.test.cjs tests/desktop/microphone-settings.test.cjs tests/desktop/model-inventory.test.cjs
+        run: node --test tests/desktop/model-catalog.test.cjs tests/desktop/hardware-profile.test.cjs tests/desktop/accelerator-profile.test.cjs tests/desktop/product-presentation.test.cjs tests/desktop/guided-setup.test.cjs tests/desktop/voice-reliability.test.cjs tests/desktop/voice-pipeline.test.cjs tests/desktop/microphone-permissions.test.cjs tests/desktop/microphone-devices.test.cjs tests/desktop/microphone-settings.test.cjs tests/desktop/model-inventory.test.cjs tests/desktop/microphone-recovery.test.cjs tests/desktop/microphone-strict-react.test.cjs
       - name: Syntax-check Electron main
         run: node --check apps/desktop/electron/main.cjs
+      - name: Verify microphone-recovery preload helper syntax
+        run: node --check apps/desktop/electron/microphone-recovery.cjs
       - name: Syntax-check Electron preload
         run: node --check apps/desktop/electron/preload.cjs
       - name: Build the existing Vite renderer
