@@ -28,6 +28,8 @@ type Props = {
   selectedMicId: string;
   onSelectMic: (id: string) => void;
   voiceActive: boolean;
+  voiceStage?: string;
+  onStartVoiceTest?: () => void;
   onMicUnavailable: () => void;
   allowlistInput: string;
   onAllowlistInput: (value: string) => void;
@@ -37,7 +39,7 @@ type Props = {
 
 export function IntelligentSettings({
   settings, draft, setDraft, setupCheck, sayVoices, onRefreshVoices, onSave, onConfigured,
-  selectedMicId, onSelectMic, voiceActive, onMicUnavailable, allowlistInput,
+  selectedMicId, onSelectMic, voiceActive, voiceStage, onStartVoiceTest, onMicUnavailable, allowlistInput,
   onAllowlistInput, onAddPath, onRemovePath
 }: Props) {
   const [section, setSection] = useState<Section>("input");
@@ -103,7 +105,8 @@ export function IntelligentSettings({
         </div>
         <p>Prüfe zuerst das Mikrofon. Der Hardwaretest funktioniert auch dann, wenn Whisper noch nicht installiert ist.</p>
         <MicrophoneSettings selectedId={selectedMicId} onSelect={onSelectMic} voiceActive={voiceActive}
-          onDeviceUnavailable={onMicUnavailable} sttAvailable={setupCheck.report?.stt.status === "available"} />
+          onDeviceUnavailable={onMicUnavailable} sttAvailable={setupCheck.report?.stt.status === "available"}
+          onStartVoiceTest={onStartVoiceTest} voiceStage={voiceStage} />
         <div className="settings-subsection">
           <div className="settings-inline-heading"><h4>Whisper-Modell</h4>
             <button type="button" className="secondary" onClick={() => setReload(n => n + 1)}>Modelle aktualisieren</button>
