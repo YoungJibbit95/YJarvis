@@ -211,9 +211,16 @@ async def complete_chat(
             f"Ollama completion error {response.status_code}: {response.text}"
         )
 
-    data = response.json()
+    try:
+        data = (json.loads(response.content, object_pairs_hook=_unique_json_fields)
+                if text_only else response.json())
+    except ValueError as error:
+        if text_only:
+            raise LlmError("Ungueltige oder mehrdeutige Narration-JSON-Antwort") from error
+        raise
     if text_only:
-        if not isinstance(data, dict) or data.get("done") is not True:
+        if (not isinstance(data, dict) or data.get("done") is not True
+                or data.get("tool_calls") not in (None, []) or "function_call" in data):
             raise LlmError("Unvollstaendige Narration-Antwort")
         message = data.get("message")
         if (not isinstance(message, dict) or message.get("role") != "assistant"
@@ -223,7 +230,9 @@ async def complete_chat(
                 or not message["content"].strip()
                 or data.get("done_reason") not in (None, "stop")):
             raise LlmError("Ungueltige Textantwort oder unerlaubter Tool-Aufruf")
-        return message["content"].strip()
+        # The narration boundary validates exactly what will be published,
+        # including whitespace/control characters; do not sanitize it first.
+        return message["content"]
     return str(data.get("message", {}).get("content", "")).strip()
 
 
