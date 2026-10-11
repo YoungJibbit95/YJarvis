@@ -35,6 +35,12 @@ function nodes(node) {
   return [node, ...nodes(node.props?.children)];
 }
 
+function visibleText(node) {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(visibleText).join("");
+  return node && typeof node === "object" ? visibleText(node.props?.children) : "";
+}
+
 function settings() {
   return {
     model_name: "model-a:latest", ollama_base_url: "http://127.0.0.1:11434",
@@ -129,7 +135,7 @@ async function harness(inventoryResponse = actualInventory) {
     text: () => JSON.stringify(tree),
     installer: () => nodes(tree).find(n => typeof n.type === "function" && n.type.name === "Installer"),
     click(label) {
-      const b = nodes(tree).find(n => n.type === "button" && JSON.stringify(n.props.children).includes(label));
+      const b = nodes(tree).find(n => n.type === "button" && visibleText(n.props.children).includes(label));
       assert.ok(b, "Missing button: " + label);
       b.props.onClick();
     },
@@ -275,4 +281,20 @@ test("overview and navigation do not automatically invoke installation or make f
   assert.equal(h.writes.length, 0);
   h.click("Einrichtung schließen"); await h.settle();
   assert.equal(h.installer(), undefined);
+});
+
+
+test("save failure remains visible and keeps unsaved custom and safety values", async () => {
+  const h = await harness();
+  h.click("KI & Modelle"); await h.settle();
+  const select = h.nodes().find(n => n.type === "select" && n.props.value === "model-a:latest");
+  select.props.onChange({ target: { value: "model-b:latest" } }); await h.settle();
+  h.props.onSave = async () => { throw new Error("Speicherverbindung unterbrochen"); };
+  h.click("Übersicht"); await h.settle(); // rerender with the failing save implementation
+  h.click("Änderungen speichern"); await h.settle();
+  assert.match(h.text(), /Speichern fehlgeschlagen/);
+  assert.match(h.text(), /Speicherverbindung unterbrochen/);
+  assert.equal(h.props.draft.model_name, "model-b:latest");
+  assert.deepEqual(h.props.draft.allowed_paths, ["/own/workspace"]);
+  assert.equal(h.writes.length, 0);
 });

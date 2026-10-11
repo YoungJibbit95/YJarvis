@@ -91,6 +91,7 @@ function nodes(node) {
 async function appHarness(apiOverrides = {}) {
   const slots = [], effects = [], sockets = [], timers = new Map();
   let cursor = 0, dirty = true, tree, timerId = 0;
+  let confirmAllowed = false, confirmCount = 0;
   const hooks = {
     ...React, memo: (component) => component,
     useState(initial) {
@@ -141,6 +142,7 @@ async function appHarness(apiOverrides = {}) {
     Error, WebSocket: Socket,
     navigator: { mediaDevices: { getUserMedia: async () => { throw new Error("Microphone denied"); } } },
     window: { addEventListener() {}, removeEventListener() {},
+      confirm() { confirmCount++; return confirmAllowed; },
       setTimeout(callback, delay) { const id = ++timerId; timers.set(id, { callback, delay }); return id; },
       clearTimeout(id) { timers.delete(id); }, cancelAnimationFrame() {} }
   });
@@ -157,6 +159,8 @@ async function appHarness(apiOverrides = {}) {
   await settle();
   const find = (predicate) => nodes(tree).find(predicate);
   return { sockets, api, settle, find,
+    allowLeavingDirtySettings(value) { confirmAllowed = value; },
+    confirmCount: () => confirmCount,
     feedback: () => find((node) => node.type === AppFeedback).props,
     presence: () => find((node) => node.type === PresenceStage).props,
     diagnostic: () => find((node) => node.props?.className === "connection-details"),
@@ -233,3 +237,26 @@ test("microphone startup rejection is visible and does not imply lost connection
   assert.equal(app.feedback().connection.phase, "connected");
   assert.equal(app.presence().microphoneActive, false);
 });
+
+test("leaving Settings with an unsaved model choice requires an explicit decision", async () => {
+  const app = await appHarness();
+  const shell = () => app.find(node => node.props?.onNavigate && node.props?.activeTab);
+  shell().props.onNavigate("settings"); await app.settle();
+  assert.equal(shell().props.activeTab, "settings");
+  const view = app.find(node => node.props?.setDraft && node.props?.onSave);
+  assert.ok(view, "actual Settings must expose the draft state");
+  view.props.setDraft(previous => ({ ...previous, model_name: "dirty-test-model" }));
+  await app.settle();
+
+  shell().props.onNavigate("chat"); await app.settle();
+  assert.equal(shell().props.activeTab, "settings", "rejecting navigation must preserve the draft");
+  assert.equal(app.confirmCount(), 1);
+  assert.equal(app.find(node => node.props?.setDraft && node.props?.onSave).props.draft.model_name,
+    "dirty-test-model");
+
+  app.allowLeavingDirtySettings(true);
+  shell().props.onNavigate("chat"); await app.settle();
+  assert.equal(shell().props.activeTab, "chat");
+  assert.equal(app.confirmCount(), 2);
+});
+
