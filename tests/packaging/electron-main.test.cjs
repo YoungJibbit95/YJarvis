@@ -14,7 +14,7 @@ for (const scenario of ["healthy", "backend-missing", "ollama-missing"]) {
     const calls = [];
     let handler;
     let windowControl;
-    let permissionRequest, permissionCheck, permissionStatus;
+    let permissionRequest, permissionCheck, permissionStatus, privacySettingsHandler;
     const windows = [];
     const mediaSession = {
       setPermissionRequestHandler(fn) { permissionRequest = fn; },
@@ -67,8 +67,24 @@ for (const scenario of ["healthy", "backend-missing", "ollama-missing"]) {
           systemPreferences: { getMediaAccessStatus: () => "unknown", askForMediaAccess: async () => false },
           Menu: { setApplicationMenu(menu) { assert.equal(menu, null); } },
           ipcMain: {
-            on(channel, callback) { assert.equal(channel, "jarvis:window-control"); windowControl = callback; },
-            handle(channel, callback) { assert.equal(channel, "jarvis:microphone-permission-status"); permissionStatus = callback; }
+            on(channel, callback) {
+              assert.equal(channel, "jarvis:window-control");
+              windowControl = callback;
+            },
+            handle(channel, callback) {
+              if (channel === "jarvis:microphone-permission-status") permissionStatus = callback;
+              else if (channel === "jarvis:open-microphone-privacy-settings") privacySettingsHandler = callback;
+              else assert.fail("Unrecognized IPC channel: " + channel);
+            }
+          },
+          shell: {
+            async openExternal(target) {
+              // The actual privileged module must choose this fixed OS Settings
+              // URI, even if a renderer submits an arbitrary argument.
+              assert.equal(target, "ms-settings:privacy-microphone");
+              calls.push("privacy-settings");
+            },
+            async openPath() { assert.fail("Windows must not open arbitrary paths"); }
           },
           protocol: { registerSchemesAsPrivileged(schemes) { assert.equal(schemes[0].privileges.corsEnabled, true); }, handle(scheme, callback) { assert.equal(scheme, "app"); handler = callback; } },
           dialog: { showErrorBox(title, message) { assert.equal(message, "backend missing"); calls.push("error"); } }
@@ -79,6 +95,10 @@ for (const scenario of ["healthy", "backend-missing", "ollama-missing"]) {
         if (name === "./microphone-permissions.cjs") {
           return require("../../apps/desktop/electron/microphone-permissions.cjs");
         }
+        if (name === "./microphone-recovery.cjs") {
+          // Load the real, shipped IPC gate in the packaging VM.
+          return require("../../apps/desktop/electron/microphone-recovery.cjs");
+        }
         throw new Error(`Unexpected import ${name}`);
       }
     });
@@ -86,6 +106,7 @@ for (const scenario of ["healthy", "backend-missing", "ollama-missing"]) {
     assert.equal(typeof permissionRequest, "function");
     assert.equal(typeof permissionCheck, "function");
     assert.equal(typeof permissionStatus, "function");
+    assert.equal(typeof privacySettingsHandler, "function");
     assert.equal(handler({ url: "app://other/index.html" }).status, 404);
     if (scenario === "backend-missing") {
       assert.deepEqual(calls, ["backend", "error"]);
@@ -117,6 +138,20 @@ for (const scenario of ["healthy", "backend-missing", "ollama-missing"]) {
       windowControl(event, "toggle-maximize");
       windowControl(event, "close");
       assert.deepEqual(calls.slice(before), ["minimize", "maximize", "close"]);
+
+      const trusted = { sender: webContents, senderFrame: webContents.mainFrame };
+      const safeCount = calls.length;
+      assert.equal(await privacySettingsHandler(trusted, "https://evil.example/execute"), true);
+      assert.deepEqual(calls.slice(safeCount), ["privacy-settings"]);
+      assert.equal(await privacySettingsHandler({
+        sender: webContents, senderFrame: { url: "https://evil.example/" }
+      }), false, "untrusted frame cannot trigger a shell action");
+      assert.equal(await privacySettingsHandler({
+        sender: { mainFrame: { url: "app://yjarvis/index.html" } },
+        senderFrame: webContents.mainFrame
+      }), false, "unregistered webContents cannot trigger a shell action");
+      assert.deepEqual(calls.slice(safeCount), ["privacy-settings"],
+        "blocked IPC attempts must never call Electron shell");
     }
   });
 }

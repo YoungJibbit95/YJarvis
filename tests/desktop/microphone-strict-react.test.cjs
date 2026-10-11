@@ -91,16 +91,24 @@ function fakeDom() {
 
 async function withMountedMicrophone(callback) {
   const { doc, win, Node } = fakeDom();
-  const original = {
-    window: global.window, document: global.document, navigator: global.navigator,
-    HTMLElement: global.HTMLElement, Node: global.Node,
-    IS_REACT_ACT_ENVIRONMENT: global.IS_REACT_ACT_ENVIRONMENT
-  };
-  Object.assign(global, {
+  // Node 22+ exposes navigator via a getter-only global. Define temporary
+  // own properties and restore their *descriptors* (not just old values) even
+  // if a React effect, media mock or assertion throws.
+  const replacements = {
     window: win, document: doc, navigator: { userAgent: "node-react-strict-test" },
     HTMLElement: Node, Node, IS_REACT_ACT_ENVIRONMENT: true,
-  });
-  let root;
+  };
+  const originals = Object.fromEntries(
+    Object.keys(replacements).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)])
+  );
+  originals.MediaRecorder = Object.getOwnPropertyDescriptor(globalThis, "MediaRecorder");
+  try {
+    for (const [key, value] of Object.entries(replacements)) {
+      Object.defineProperty(globalThis, key, {
+        value, configurable: true, writable: true, enumerable: true
+      });
+    }
+    let root;
   const intervals = new Map(), requests = [], tracks = [], recorders = [], contexts = [];
   let intervalId = 0, setupCalls = 0, cleanups = 0;
   const track = { readyState: "live", enabled: true, stops: 0,
@@ -137,8 +145,9 @@ async function withMountedMicrophone(callback) {
       this.onstop?.();
     }
   };
-  const previousRecorder = global.MediaRecorder;
-  global.MediaRecorder = Recorder;
+  Object.defineProperty(globalThis, "MediaRecorder", {
+    value: Recorder, configurable: true, writable: true, enumerable: true
+  });
   const microphone = load("../voice/microphoneDevices.ts", {}, { window: win });
   const { MicrophoneSettings } = load("../voice/MicrophoneSettings.tsx", {
     react: React, "../api": { transcribe: async () => ({ text: "ok", latency_ms: 12 }) },
@@ -168,8 +177,12 @@ async function withMountedMicrophone(callback) {
       requests, intervals, tracks, contexts, recorders, text: () => container.textContent });
   } finally {
     if (root) await act(async () => { root.unmount(); });
-    global.MediaRecorder = previousRecorder;
-    Object.assign(global, original);
+  }
+  } finally {
+    for (const [key, descriptor] of Object.entries(originals)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
   }
 }
 
