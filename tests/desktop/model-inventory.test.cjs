@@ -53,6 +53,11 @@ function settings() {
 
 async function harness(inventoryResponse = actualInventory) {
   const slots = [], effects = [], reads = [], writes = [];
+  const deviceListeners = new Set();
+  const mediaDevices = {
+    addEventListener(name, listener) { if (name === "devicechange") deviceListeners.add(listener); },
+    removeEventListener(name, listener) { if (name === "devicechange") deviceListeners.delete(listener); }
+  };
   let cursor = 0, dirty = true, tree;
   const props = {
     settings: settings(), draft: settings(),
@@ -67,7 +72,7 @@ async function harness(inventoryResponse = actualInventory) {
       props.settings = JSON.parse(JSON.stringify(props.draft));
       dirty = true;
     },
-    onConfigured: () => {}, selectedMicId: "", onSelectMic: () => {},
+    onConfigured: () => {}, selectedMicId: "", onSelectMic: id => { props.selectedMicId = id; dirty = true; },
     voiceActive: false, onMicUnavailable: () => {}, allowlistInput: "",
     onAllowlistInput: () => {}, onAddPath: () => {}, onRemovePath: () => {},
   };
@@ -116,7 +121,7 @@ async function harness(inventoryResponse = actualInventory) {
     "../setup/GuidedInstaller": { GuidedInstaller: function Installer() {} },
     "../setup/ModelCatalogBrowser": { ModelCatalogBrowser: function ModelCatalog() {} },
     "../voice/MicrophoneSettings": { MicrophoneSettings: function Mic() {} },
-  }, { AbortController });
+  }, { AbortController, navigator: { mediaDevices } });
 
   async function settle() {
     for (let i = 0; i < 20; i++) {
@@ -132,6 +137,9 @@ async function harness(inventoryResponse = actualInventory) {
   await settle();
   return {
     props, writes, reads, settle, nodes: () => nodes(tree),
+    deviceChange() { for (const listener of [...deviceListeners]) listener(); },
+    deviceListenerCount: () => deviceListeners.size,
+    unmount() { slots.forEach(slot => slot?.cleanup?.()); },
     text: () => JSON.stringify(tree),
     installer: () => nodes(tree).find(n => typeof n.type === "function" && n.type.name === "Installer"),
     click(label) {
@@ -224,6 +232,44 @@ test("overview is the initial Settings page with runtime-backed actionable statu
   await h.settle();
   h.click("Übersicht"); await h.settle();
   assert.match(h.text(), /Hardwaretest erfolgreich/);
+  h.click("Mikrofon einrichten"); await h.settle();
+  const reopened = h.nodes().find(n => n.type?.name === "Mic");
+  assert.equal(reopened.props.hardwareTested, true, "reopened diagnostic uses overview evidence");
+  reopened.props.onSelect("mic-2"); await h.settle();
+  assert.equal(h.nodes().find(n => n.type?.name === "Mic").props.hardwareTested, false);
+  h.click("Übersicht"); await h.settle();
+  assert.match(h.text(), /Hardware noch nicht getestet/);
+  h.click("Mikrofon einrichten"); await h.settle();
+  h.nodes().find(n => n.type?.name === "Mic").props.onHardwareTested(true);
+  await h.settle();
+  h.nodes().find(n => n.type?.name === "Mic").props.onDeviceUnavailable();
+  await h.settle();
+  h.click("Übersicht"); await h.settle();
+  assert.match(h.text(), /Hardware noch nicht getestet/);
+});
+
+test("Settings invalidates system-default proof while the microphone view is unmounted", async () => {
+  const h = await harness();
+  assert.equal(h.deviceListenerCount(), 1);
+  h.click("Mikrofon einrichten"); await h.settle();
+  const before = h.nodes().find(n => n.type?.name === "Mic");
+  before.props.onHardwareTested(true); await h.settle();
+  assert.equal(h.nodes().find(n => n.type?.name === "Mic").props.hardwareTested, true);
+  h.click("Übersicht"); await h.settle();
+  assert.match(h.text(), /Hardwaretest erfolgreich/);
+
+  h.deviceChange();
+  // A recorder callback from the previous render must not restore proof even
+  // before React commits the update caused by the device event.
+  before.props.onHardwareTested(true);
+  await h.settle();
+  assert.match(h.text(), /Hardware noch nicht getestet/);
+  h.click("Mikrofon einrichten"); await h.settle();
+  const after = h.nodes().find(n => n.type?.name === "Mic");
+  assert.equal(after.props.hardwareTested, false);
+  assert.equal(after.props.deviceRevision, 1);
+  h.unmount();
+  assert.equal(h.deviceListenerCount(), 0);
 });
 
 test("installed and catalog chat models have separate real-data selection and explicit install flow", async () => {

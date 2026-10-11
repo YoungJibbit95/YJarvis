@@ -76,7 +76,12 @@ export function IntelligentSettings({
   const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
   const [catalogError, setCatalogError] = useState("");
   const [inventoryStatus, setInventoryStatus] = useState<"checking" | "ready" | "error">("checking");
-  const [micHardwareTested, setMicHardwareTested] = useState(false);
+  const [testedMicId, setTestedMicId] = useState<string | null>(null);
+  const [deviceRevision, setDeviceRevision] = useState(0);
+  const proofEpoch = useRef(0);
+  const selectedMicRef = useRef(selectedMicId);
+  selectedMicRef.current = selectedMicId;
+  const micHardwareTested = testedMicId === selectedMicId;
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState("");
   const [preview, setPreview] = useState<"idle" | "playing" | "done" | "error">("idle");
@@ -87,12 +92,29 @@ export function IntelligentSettings({
     // Keep opened install options and switched sections immediately visible in
     // the scrollable content area, without moving the surrounding app shell.
     contentRef.current?.scrollTo?.({ top: 0, behavior: "auto" });
+    // Compact windows scroll the surrounding view instead of nesting a tiny
+    // Settings scroller; bring the newly selected section into view there too.
+    contentRef.current?.closest(".active-view")?.scrollTo?.({ top: 0, behavior: "auto" });
   }, [section, installerOpen, installTarget?.category, installTarget?.model]);
 
   useEffect(() => {
     // A test on a former device is not evidence for a newly chosen microphone.
-    setMicHardwareTested(false);
+    setTestedMicId(null);
   }, [selectedMicId]);
+
+  useEffect(() => {
+    // The diagnostic is unmounted in the other Settings sections. Keep the
+    // current-device proof invalidation alive for the entire Settings view.
+    const media = navigator.mediaDevices;
+    if (!media?.addEventListener) return;
+    const handleChange = () => {
+      proofEpoch.current += 1;
+      setTestedMicId(null);
+      setDeviceRevision(value => value + 1);
+    };
+    media.addEventListener("devicechange", handleChange);
+    return () => media.removeEventListener("devicechange", handleChange);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -179,6 +201,7 @@ export function IntelligentSettings({
       setPreview("error"); setPreviewError((reason as Error).message);
     }
   }
+  const renderProofEpoch = proofEpoch.current;
 
   return <section className="panel settings yj-settings-panel">
     <header className="panel-header yj-settings-header">
@@ -276,11 +299,21 @@ export function IntelligentSettings({
           <span className="settings-pill">{setupCheck.report?.stt.status === "available" ? "Whisper bereit laut Setup" : "Whisper nicht bestätigt"}</span>
         </div>
         <p>Prüfe zuerst das Mikrofon. Der Hardwaretest funktioniert auch dann, wenn Whisper noch nicht installiert ist.</p>
-        <MicrophoneSettings selectedId={selectedMicId} onSelect={onSelectMic} voiceActive={voiceActive}
-          onDeviceUnavailable={() => { setMicHardwareTested(false); onMicUnavailable(); }}
+        <MicrophoneSettings selectedId={selectedMicId} onSelect={id => {
+            proofEpoch.current += 1; setTestedMicId(null); onSelectMic(id);
+          }}
+          deviceRevision={deviceRevision} hardwareTested={micHardwareTested} voiceActive={voiceActive}
+          onDeviceUnavailable={() => {
+            proofEpoch.current += 1; setTestedMicId(null); onMicUnavailable();
+          }}
           sttAvailable={setupCheck.report?.stt.status === "available"}
           onStartVoiceTest={onStartVoiceTest} voiceStage={voiceStage}
-          onHardwareTested={setMicHardwareTested} />
+          onHardwareTested={passed => {
+            // A callback from a capture that predates a device event or a
+            // selection change cannot restore the old proof before React rerenders.
+            if (renderProofEpoch !== proofEpoch.current || selectedMicId !== selectedMicRef.current) return;
+            setTestedMicId(passed ? selectedMicId : null);
+          }} />
         <div className="settings-subsection">
           <div className="settings-inline-heading"><h4>Whisper-Modell</h4>
             <button type="button" className="secondary" onClick={() => setReload(n => n + 1)}>Modelle aktualisieren</button>

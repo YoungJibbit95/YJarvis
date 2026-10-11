@@ -1,5 +1,76 @@
 # YJUX-02 — Voice recovery and settings redesign
 
+## PR #43 external review correction
+
+The first PR #43 head left two gaps in microphone evidence handling. The
+Settings view owned the tested device ID, while its `devicechange` listener
+existed only inside the conditional microphone diagnostic. A system-default
+change on another Settings page could therefore leave the overview claiming
+an old hardware success. Settings now listens for device changes throughout
+its own mount, invalidates the proof even when the selected ID is empty, and
+passes a device revision to the diagnostic. Listener cleanup follows the
+Settings and diagnostic mount lifetimes, including React StrictMode replay.
+
+A device event during a capture previously cleared the parent proof without
+ending the recorder generation; a later `onstop` could restore it. The
+diagnostic now invalidates the generation synchronously, stops the recorder,
+releases tracks, AudioContext and timers, and clears access, signal, format,
+transcript and result displays. Delayed recorder callbacks and pending media
+requests cannot restore evidence for a previous device. Device selection,
+OS denial/restriction, access failure and recorder error use the same
+fail-closed state. A new user-started RMS plus nonempty Blob test restores
+readiness. A Whisper-only transcription failure after such a capture leaves
+the independent hardware proof intact while reporting the Whisper failure.
+
+ReactDOM StrictMode tests exercise the real Settings and microphone component
+mounts, section changes, listener cleanup, default-device invalidation,
+permission revocation and retesting with simulated MediaDevices. Focused
+recorder tests delay `onstop` after a device event and verify that no stale
+success appears. These tests do not exercise physical devices, packaged OS
+privacy prompts or actual microphone audio; those remain **NOT RUN**.
+
+## Post-merge review corrections
+
+PR [#41](https://github.com/YoungJibbit95/YJarvis/pull/41) was merged into
+`main` as `666a9da0482b9b9cd84c1159f4300a46e951bc6b` on 2026-10-11.
+The [post-merge baseline](https://github.com/YoungJibbit95/YJarvis/actions/runs/38127668435)
+and [Wiki workflow](https://github.com/YoungJibbit95/YJarvis/actions/runs/38127668441)
+passed. Two subsequently supplied MEDIUM review findings require a separate,
+explicitly authorized follow-up PR from that main SHA.
+
+1. `switchTab` now returns whether leaving Settings was accepted. The Settings
+   Voice-test callback starts the existing Voice path only after acceptance.
+   A rejected dirty-draft confirmation keeps Settings visible and makes no
+   microphone request. The existing in-flight guard still prevents duplicate
+   starts; Chat and Command Palette navigation use the same decision function.
+2. Settings owns one current-device hardware proof, passed to the microphone
+   diagnostic on every mount. Only measured RMS plus a nonempty MediaRecorder
+   blob set it. A selected-device change, OS `devicechange` (including a changed
+   system default), reported denial/restriction, or failed audio access/capture
+   clears it. A Whisper transcription failure after a verified recording does
+   not erase that independent hardware proof. Permission granted by itself
+   never sets it. Access, signal, recorder and Voice-test readiness display the
+   same proof after switching away and back.
+
+The follow-up UI check used the live Vite renderer and a separate temporary
+local backend on macOS at a 663×695 browser viewport. All five Settings areas
+were reachable; inventory-backed installed/installable states and Save/Discard
+were visible. At this compact size, navigation labels originally broke inside
+four narrow columns and the diagnostic content had only 68 px of scroll height.
+The responsive correction uses wider navigation buttons and one outer scroll
+area with a sticky Save/Discard footer. No install, save, microphone, Whisper,
+Voice or speaker action was triggered during this visual check. The browser
+preview has no packaged Electron permission path, so it is not hardware proof.
+
+Focused regression tests cover rejected/accepted Voice navigation, one capture
+start, Settings section round trips, device selection/disconnect, OS revocation,
+permission granted without proof, no signal, empty blob, Whisper failure and
+recorder concurrency. Full command results and final-head CI belong in the
+follow-up PR handoff. Native Windows/macOS microphone hardware, OS privacy UI,
+live USB hot-swap, real Whisper/wakeword and speaker playback remain **NOT RUN**.
+The follow-up PR can be reverted on its own without deleting profiles, runtime
+databases, models, audio assets or user settings.
+
 ## Verified start gate
 
 - YJUX-01 PR #40 merged; original main: `16da0c0d72abaa14dfb4d19c394fe7274c2c8dd9`.
@@ -21,11 +92,6 @@
 **Windows 11**: open packaged YJarvis → Settings → Spracheingabe → check OS status → deliberately click `Mikrofonzugriff anfordern` → speak into chosen device and run `Mikrofon testen`; verify live RMS, nonempty recorder bytes, proper MIME. Run separate Whisper test only when setup reports required binary/model/FFmpeg, confirm transcript without Chat, then start `Jarvis hören lassen` and say wakeword + command; confirm exactly one Chat request. While running, unplug USB mic/change device and verify controlled stop/no duplicate recorders. Deny Windows desktop-app mic access in Windows Settings and verify errors and recovery after re-enabling. **macOS**: repeat from correctly packaged, TCC-enabled `.app` with first grant and prior denial; verify System Settings + app restart.
 
 **HARDWARE TESTS: NOT RUN** on these CI runners. React/AudioContext/MediaRecorder tests are mocked hardware but actual React effects are exercised via ReactDOM StrictMode in targeted integration test. Real microphone, OS privacy UI and physical TTS echo behavior require a device. No latency invented.
-
-## P1 redesign and final CI
-
-(To be completed in the next commit on this same branch. No premature PASS until a real 7/7 PR-head Baseline CI and successful Wiki validation.)
-
 
 ## P1 — Implemented Settings workbench and actionable model/voice discovery
 
@@ -106,8 +172,9 @@ file scan is introduced.
   Settings URI shell mock and positive/negative trusted-webContents IPC tests.
   Camera, screen capture and arbitrary URI execution remain blocked.
 
-GitHub Actions final-head CI and Wiki links, exact pass counts, and the
-reviewed diff should be recorded in PR #41 after those runs conclude.
+PR #41's final-head [baseline CI](https://github.com/YoungJibbit95/YJarvis/actions/runs/38099865798)
+and [Wiki validation](https://github.com/YoungJibbit95/YJarvis/actions/runs/38099865823)
+passed; follow-up PR evidence is recorded separately.
 
 ## Verification boundaries and rollback
 
@@ -118,7 +185,8 @@ React/MediaRecorder mocks or installer smoke for real audio hardware.
 The on-device instructions above remain required before claiming full
 microphone reliability on a specific computer.
 
-If and only if externally approved and merged, revert this single PR
-to undo the Settings and recovery corrections. No user databases, saved
-profiles, local Ollama models, downloaded Whisper/Piper assets or voice
-history are to be deleted. **External review and STOP before merge.**
+To roll back the already merged YJUX-02 work, revert PR #41's merge commit.
+The separately authorized review corrections can be reverted independently.
+Neither rollback deletes user databases, saved profiles, local Ollama models,
+downloaded Whisper/Piper assets or voice history. The follow-up still requires
+independent external review before merge.

@@ -1348,9 +1348,10 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
           JSON.stringify(settingsDraft) !== JSON.stringify(settings) &&
           typeof window.confirm === "function" &&
           !window.confirm("Du hast ungespeicherte Einstellungen. Ohne Speichern bleiben sie als Entwurf erhalten. Trotzdem den Bereich verlassen?")) {
-        return;
+        return false;
       }
       startTabTransition(() => { setActiveTab(tab); });
+      return true;
     },
     [startTabTransition, activeTab, settings, settingsDraft]
   );
@@ -1995,7 +1996,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       voiceStage={voiceStage}
       onStartVoiceTest={() => {
         if (voiceModeEnabledRef.current || voiceStartInProgressRef.current) return;
-        switchTab("chat");
+        if (!switchTab("chat")) return;
         void startVoiceMode();
       }}
       onMicUnavailable={() => {
