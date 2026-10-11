@@ -183,7 +183,7 @@ class LegacyResponses:
                 profile=profile, tool_name=tool_name, tool_input=tool_input,
                 result=tool_result, user_intent=user_intent,
             )
-            model = str(settings.get("model_name", "qwen2.5:3b-instruct"))
+            model = str(settings.get("model_name", "qwen2.5:3b-instruct")).strip()
             if base_url is None or messages is None or model.lower().endswith((":cloud", "-cloud")):
                 return technical_result
             # One completion, bounded over the whole request as well as reads.

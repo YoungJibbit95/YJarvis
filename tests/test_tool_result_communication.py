@@ -191,6 +191,7 @@ def test_nonpilot_sensitive_or_unbounded_evidence_never_reaches_model(rig, name,
     {"ollama_base_url": "http://localhost:11434/proxy"},
     {"model_name": "gpt-oss:120b-cloud"},
     {"model_name": "remote:cloud"},
+    {"model_name": " remote:cloud "},
 ])
 def test_nonlocal_configuration_uses_technical_result_without_model_call(rig, monkeypatch, settings):
     rig.service = rig.enable("JARVIS_TOOL_SUMMARY_VIA_LLM")
@@ -306,6 +307,18 @@ def test_real_registry_and_tool_validation_precede_narration(rig, monkeypatch, n
         rig.summary.assert_awaited_once()
 
     asyncio.run(scenario())
+
+
+def test_default_on_does_not_add_any_model_call_to_normal_conversation(rig, monkeypatch):
+    monkeypatch.delenv("JARVIS_TOOL_SUMMARY_VIA_LLM")
+    rig.service = AgentService(rig.db, rig.service.turn_engine.responses.event_bus, rig.tools, rig.service.profile_path)
+    rig.set_stream(["Hallo, schön dich zu sehen."])
+    asyncio.run(rig.service.start_run("session", "chat-run", "Hallo Jarvis"))
+    rig.stream.assert_called_once()
+    rig.summary.assert_not_awaited()
+    rig.planner.assert_not_awaited()
+    rig.tools.execute.assert_not_awaited()
+    assert rig.events[-2]["content"] == "Hallo, schön dich zu sehen."
 
 
 @pytest.mark.parametrize("decision,success", [("deny", True), ("approve", False)])
