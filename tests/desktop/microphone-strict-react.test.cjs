@@ -62,6 +62,8 @@ function fakeDom() {
     }
     addEventListener() {}
     removeEventListener() {}
+    closest() { return null; }
+    scrollTo() {}
     setAttribute(key, value) { this.attributes[key] = String(value); }
     removeAttribute(key) { delete this.attributes[key]; }
     getAttribute(key) { return this.attributes[key] ?? null; }
@@ -89,7 +91,7 @@ function fakeDom() {
   return { doc, win, Node };
 }
 
-async function withMountedMicrophone(callback) {
+async function withMountedMicrophone(callback, { settingsView = false } = {}) {
   const { doc, win, Node } = fakeDom();
   // Node 22+ exposes navigator via a getter-only global. Define temporary
   // own properties and restore their *descriptors* (not just old values) even
@@ -110,16 +112,28 @@ async function withMountedMicrophone(callback) {
     }
     let root;
   const intervals = new Map(), requests = [], tracks = [], recorders = [], contexts = [];
+  const mediaListeners = new Map();
   let intervalId = 0, setupCalls = 0, cleanups = 0;
-  const track = { readyState: "live", enabled: true, stops: 0,
-    stop() { this.stops++; this.readyState = "ended"; } };
-  tracks.push(track);
-  const stream = { getAudioTracks: () => [track], getTracks: () => [track] };
+  let nativeStatus = "unknown";
+  win.jarvisDesktop.microphoneStatus = async () => nativeStatus;
+  let devices = [{ kind: "audioinput", deviceId: "mic-usb", label: "USB Mic" }];
   const media = {
-    async enumerateDevices() { return [{ kind: "audioinput", deviceId: "mic-usb", label: "USB Mic" }]; },
-    async getUserMedia(options) { requests.push(options); return stream; },
-    addEventListener() { setupCalls++; },
-    removeEventListener() { cleanups++; },
+    async enumerateDevices() { return devices; },
+    async getUserMedia(options) {
+      requests.push(options);
+      const track = { readyState: "live", enabled: true, stops: 0,
+        stop() { this.stops++; this.readyState = "ended"; } };
+      tracks.push(track);
+      return { getAudioTracks: () => [track], getTracks: () => [track] };
+    },
+    addEventListener(name, listener) {
+      setupCalls++;
+      if (!mediaListeners.has(name)) mediaListeners.set(name, new Set());
+      mediaListeners.get(name).add(listener);
+    },
+    removeEventListener(name, listener) {
+      cleanups++; mediaListeners.get(name)?.delete(listener);
+    },
   };
   const browserContext = class {
     constructor() { this.closed = 0; contexts.push(this); }
@@ -159,11 +173,47 @@ async function withMountedMicrophone(callback) {
   doc.body.appendChild(container);
   try {
     root = createRoot(container);
-    await act(async () => {
-      root.render(React.createElement(React.StrictMode, null, React.createElement(MicrophoneSettings, {
+    let view;
+    if (settingsView) {
+      const settings = {
+        model_name: "local", ollama_base_url: "http://127.0.0.1:11434", language: "de",
+        whisper_binary: "auto", whisper_model_path: "", tts_engine: "piper",
+        tts_voice: "", tts_model_path: "", say_rate_wpm: 235,
+        tts_sir_pronunciation: "Sör", allowed_paths: []
+      };
+      const { IntelligentSettings } = load("../settings/IntelligentSettings.tsx", {
+        react: React,
+        "../api": {
+          fetchModelInventory: async () => ({
+            ollama: { status: "offline", models: [] },
+            whisper: { models: [], binary_available: false, ffmpeg_available: false },
+            tts: { piper_voices: [], say_supported: false }
+          }),
+          fetchInstallOptions: async () => ({ whisper_models: [], voices: [] }),
+          fetchModelCatalog: async () => [],
+          speak: async () => {}
+        },
+        "../setup/GuidedInstaller": { GuidedInstaller: () => null },
+        "../setup/ModelCatalogBrowser": { ModelCatalogBrowser: () => null },
+        "../voice/MicrophoneSettings": { MicrophoneSettings }
+      }, { window: win, navigator: { mediaDevices: media }, AbortController });
+      view = React.createElement(IntelligentSettings, {
+        settings, draft: settings, setDraft() {},
+        setupCheck: { state: "degraded", backendReachable: true,
+          report: { stt: { status: "available" } } },
+        sayVoices: [], onRefreshVoices: async () => {}, onSave: async () => {},
+        onConfigured() {}, selectedMicId: "", onSelectMic() {},
+        voiceActive: false, onStartVoiceTest() {}, onMicUnavailable() {},
+        allowlistInput: "", onAllowlistInput() {}, onAddPath() {}, onRemovePath() {}
+      });
+    } else {
+      view = React.createElement(MicrophoneSettings, {
         selectedId: "mic-usb", onSelect() {}, onDeviceUnavailable() {}, sttAvailable: false,
         voiceActive: false
-      })));
+      });
+    }
+    await act(async () => {
+      root.render(React.createElement(React.StrictMode, null, view));
     });
     const buttons = () => container.descendants().filter(node => node.tagName === "BUTTON");
     const press = async label => {
@@ -173,10 +223,26 @@ async function withMountedMicrophone(callback) {
       assert.ok(propsKey, "actual React DOM event props missing");
       await act(async () => { button[propsKey].onClick(); });
     };
-    await callback({ press, setupCalls: () => setupCalls, cleanups: () => cleanups,
+    const button = label => buttons().find(node => node.textContent.includes(label));
+    const buttonProps = label => {
+      const node = button(label);
+      assert.ok(node, "button absent: " + label);
+      return node[Object.keys(node).find(key => key.startsWith("__reactProps$"))];
+    };
+    await callback({ press, button, buttonProps, setupCalls: () => setupCalls, cleanups: () => cleanups,
+      nativePermission(status) { nativeStatus = status; },
+      listenerCount: () => mediaListeners.get("devicechange")?.size || 0,
+      async deviceChange(nextDevices) {
+        devices = nextDevices;
+        await act(async () => {
+          for (const listener of [...mediaListeners.get("devicechange") || []]) listener();
+        });
+      },
       requests, intervals, tracks, contexts, recorders, text: () => container.textContent });
   } finally {
     if (root) await act(async () => { root.unmount(); });
+    assert.equal(mediaListeners.get("devicechange")?.size || 0, 0, "unmount must remove every device listener");
+    assert.equal(intervals.size, 0, "unmount must clear recorder timers");
   }
   } finally {
     for (const [key, descriptor] of Object.entries(originals)) {
@@ -206,4 +272,50 @@ test("actual React.StrictMode setup-cleanup-setup still starts microphone, meter
     assert.equal(contexts[0].closed, 1);
     assert.equal(intervals.size, 0);
   });
+});
+
+test("real Settings and microphone lifecycle invalidates default-device proof outside the diagnostic", async () => {
+  await withMountedMicrophone(async ({ press, buttonProps, listenerCount, deviceChange, nativePermission,
+    requests, intervals, tracks, contexts, recorders, text }) => {
+    assert.equal(listenerCount(), 1, "Settings owns the persistent device listener");
+    await press("Mikrofon einrichten");
+    assert.equal(listenerCount(), 2, "mounted diagnostic owns its separate capture listener");
+    await press("Mikrofon testen");
+    await require("react-dom/test-utils").act(async () => {
+      for (const callback of [...intervals.values()]) callback();
+    });
+    await press("Test beenden");
+    assert.match(text(), /nicht-leerer MediaRecorder-Blob bestätigt/);
+    assert.equal(buttonProps("Jarvis hören lassen").disabled, false);
+
+    await press("Übersicht");
+    assert.equal(listenerCount(), 1, "diagnostic listener was removed on section change");
+    assert.match(text(), /Hardwaretest erfolgreich/);
+    await deviceChange([{ kind: "audioinput", deviceId: "mic-new", label: "New default Mic" }]);
+    assert.match(text(), /Hardware noch nicht getestet/);
+    assert.equal(requests.length, 1, "devicechange cannot open a microphone implicitly");
+    await press("Mikrofon einrichten");
+    assert.equal(listenerCount(), 2);
+    assert.equal(buttonProps("Jarvis hören lassen").disabled, true);
+    assert.doesNotMatch(text(), /echter RMS-Pegel erkannt/);
+
+    await press("Mikrofon testen");
+    await require("react-dom/test-utils").act(async () => {
+      for (const callback of [...intervals.values()]) callback();
+    });
+    await press("Test beenden");
+    assert.equal(buttonProps("Jarvis hören lassen").disabled, false);
+    assert.equal(recorders.length, 2);
+    assert.equal(requests.length, 2);
+    nativePermission("denied");
+    await press("Berechtigung erneut prüfen");
+    assert.equal(buttonProps("Jarvis hören lassen").disabled, true);
+    assert.doesNotMatch(text(), /echter RMS-Pegel erkannt|MediaStream tatsächlich geöffnet/);
+    await press("Übersicht");
+    assert.match(text(), /Hardware noch nicht getestet/);
+    await press("Mikrofon einrichten");
+    assert.equal(listenerCount(), 2, "repeated mounting cannot accumulate listeners");
+    assert.ok(tracks.every(track => track.stops === 1));
+    assert.ok(contexts.every(context => context.closed === 1));
+  }, { settingsView: true });
 });

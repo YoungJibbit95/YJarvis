@@ -19,9 +19,10 @@ function readableText(node) {
 }
 
 async function rig({ selectedId = "", sttAvailable = false, level = 175,
-  getUserMediaError = null, recorderError = false, emptyBlob = false, recorderMime = "audio/webm" } = {}) {
+  getUserMediaError = null, recorderError = false, emptyBlob = false, recorderMime = "audio/webm",
+  deferredStop = false } = {}) {
   const slots = [], effects = [], recorders = [], tracks = [], contexts = [], calls = [], transcripts = [];
-  const listeners = new Map(), timers = new Map();
+  const listeners = new Map(), timers = new Map(), pendingStops = [];
   let cursor = 0, dirty = true, tree, timerId = 0, devices = [
     { kind: "audioinput", deviceId: "mic-1", label: "Built-in Mic" },
     { kind: "audioinput", deviceId: "mic-2", label: "USB Mic" },
@@ -69,8 +70,12 @@ async function rig({ selectedId = "", sttAvailable = false, level = 175,
     }
     stop() {
       this.state = "inactive";
-      this.ondataavailable?.({ data: new Blob([emptyBlob ? "" : "test audio"], { type: "audio/webm" }) });
-      this.onstop?.();
+      const finish = () => {
+        this.ondataavailable?.({ data: new Blob([emptyBlob ? "" : "test audio"], { type: "audio/webm" }) });
+        this.onstop?.();
+      };
+      if (deferredStop) pendingStops.push(finish);
+      else finish();
     }
   }
   class Context {
@@ -144,6 +149,9 @@ async function rig({ selectedId = "", sttAvailable = false, level = 175,
     props, tracks, recorders, contexts, calls, transcripts, timers, listeners, settle, button, status,
     tick() { for (const fn of timers.values()) fn(); },
     devices(next) { devices = next; listeners.get("devicechange")?.(); },
+    flushStops() { pendingStops.splice(0).forEach(finish => finish()); },
+    deferStops(value) { deferredStop = value; },
+    recorderError() { recorders.at(-1)?.onerror?.(); },
     nativePermission(status) { nativeStatus = status; },
     failAccess(error) { mediaError = error; },
     failTranscription(error) { transcriptError = error; },
@@ -250,6 +258,7 @@ test("permission revocation and devicechange invalidate prior evidence", async (
   h.button("Berechtigung erneut prüfen").props.onClick(); await h.settle();
   assert.equal(h.props.hardwareTested, false);
   assert.equal(h.button("Voice-Test starten").props.disabled, true);
+  assert.doesNotMatch(h.status(), /"data-state":"pass"/);
 
   h.nativePermission("granted");
   h.button("Berechtigung erneut prüfen").props.onClick(); await h.settle();
@@ -260,6 +269,48 @@ test("permission revocation and devicechange invalidate prior evidence", async (
   assert.equal(h.props.hardwareTested, true);
   h.devices([{ kind: "audioinput", deviceId: "mic-2", label: "USB Mic" }]); await h.settle();
   assert.equal(h.props.hardwareTested, false, "system default may change without a selected ID");
+  assert.doesNotMatch(h.status(), /"data-state":"pass"/);
+});
+
+test("devicechange during recording aborts generation, releases resources and ignores a late onstop", async () => {
+  const h = await rig({ sttAvailable: true, deferredStop: true });
+  h.button("Mikrofon testen").props.onClick(); await h.settle();
+  h.tick(); await h.settle();
+  assert.match(h.visibleText(), /Signal erkannt/);
+  h.devices([{ kind: "audioinput", deviceId: "mic-2", label: "Replacement Mic" }]);
+  await h.settle();
+  assert.equal(h.props.hardwareTested, false);
+  assert.equal(h.recorders[0].state, "inactive");
+  assert.equal(h.tracks[0].stopped, true);
+  assert.equal(h.contexts[0].closed, true);
+  assert.equal(h.timers.size, 0);
+  assert.equal(h.button("Voice-Test starten").props.disabled, true);
+  assert.doesNotMatch(h.status(), /"data-state":"pass"/);
+  h.flushStops(); await h.settle();
+  assert.equal(h.props.hardwareTested, false, "late recorder callbacks cannot restore proof");
+  assert.doesNotMatch(h.visibleText(), /nicht-leerer MediaRecorder-Blob bestätigt/);
+
+  h.deferStops(false);
+  h.button("Mikrofon testen").props.onClick(); await h.settle();
+  h.tick(); await h.settle();
+  h.button("Test beenden").props.onClick(); await h.settle();
+  assert.equal(h.props.hardwareTested, true, "a new RMS and Blob test restores readiness");
+  assert.equal(h.button("Voice-Test starten").props.disabled, false);
+});
+
+test("recorder error clears current proof and every stale diagnostic pass", async () => {
+  const h = await rig({ sttAvailable: true });
+  h.button("Mikrofon testen").props.onClick(); await h.settle();
+  h.tick(); await h.settle();
+  h.button("Test beenden").props.onClick(); await h.settle();
+  assert.equal(h.props.hardwareTested, true);
+  h.button("Mikrofon testen").props.onClick(); await h.settle();
+  h.tick(); await h.settle();
+  h.recorderError(); await h.settle();
+  assert.equal(h.props.hardwareTested, false);
+  assert.equal(h.button("Voice-Test starten").props.disabled, true);
+  assert.doesNotMatch(h.status(), /"data-state":"pass"/);
+  assert.equal(h.timers.size, 0);
 });
 
 test("stop/unmount releases tracks and never permits simultaneous recorders", async () => {

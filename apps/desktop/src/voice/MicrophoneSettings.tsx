@@ -21,11 +21,12 @@ type ActiveTest = {
 };
 
 export function MicrophoneSettings({
-  selectedId, onSelect, hardwareTested, voiceActive, onDeviceUnavailable, sttAvailable,
+  selectedId, onSelect, deviceRevision = 0, hardwareTested, voiceActive, onDeviceUnavailable, sttAvailable,
   onStartVoiceTest, voiceStage, onHardwareTested
 }: {
   selectedId: string;
   onSelect: (id: string) => void;
+  deviceRevision?: number;
   hardwareTested: boolean;
   voiceActive: boolean;
   onDeviceUnavailable: () => void;
@@ -58,6 +59,8 @@ export function MicrophoneSettings({
   selectedRef.current = selectedId;
   const onUnavailableRef = useRef(onDeviceUnavailable);
   onUnavailableRef.current = onDeviceUnavailable;
+  const onHardwareTestedRef = useRef(onHardwareTested);
+  onHardwareTestedRef.current = onHardwareTested;
   const running = phase === "starting" || phase === "recording" || phase === "finalizing";
 
   const release = useCallback((test: ActiveTest) => {
@@ -73,16 +76,27 @@ export function MicrophoneSettings({
     if (active.current === test) active.current = null;
   }, []);
 
-  const abortTest = useCallback(() => {
+  const stopCapture = useCallback(() => {
     generation.current += 1;
+    startInFlight.current = false;
     const current = active.current;
     if (current) {
       current.aborted = true;
       try { if (current.recorder.state !== "inactive") current.recorder.stop(); } catch { /* closed */ }
       release(current);
     }
-    if (alive.current) { setLevel(0); setPhase("idle"); setResult("Test beendet, keine Audiodaten gespeichert."); }
   }, [release]);
+
+  const clearDiagnostic = useCallback(() => {
+    setAccessEvidence("none"); setSignalSeen(false); setTranscript("");
+    setFormat(""); setResult(""); setLatencyMs(null);
+    setLevel(0); setPhase("idle");
+  }, []);
+
+  const abortTest = useCallback(() => {
+    stopCapture();
+    if (alive.current) { clearDiagnostic(); setResult("Test beendet, keine Audiodaten gespeichert."); }
+  }, [stopCapture, clearDiagnostic]);
 
   useEffect(() => {
     // React.StrictMode deliberately executes setup -> cleanup -> setup.
@@ -90,22 +104,15 @@ export function MicrophoneSettings({
     alive.current = true;
     return () => {
       alive.current = false;
-      generation.current += 1; // Invalidate every in-flight async media request.
-      startInFlight.current = false;
-      const current = active.current;
-      if (current) {
-        current.aborted = true;
-        try { if (current.recorder.state !== "inactive") current.recorder.stop(); } catch { /* closed */ }
-        release(current);
-      }
+      stopCapture(); // Invalidate every in-flight async media request.
     };
-  }, [release]);
+  }, [stopCapture]);
 
   useEffect(() => {
-    // The visible diagnostic steps must describe the currently selected device.
-    setAccessEvidence("none"); setSignalSeen(false); setTranscript("");
-    setFormat(""); setResult(""); setLevel(0); setPhase("idle");
-  }, [selectedId]);
+    // Covers selection changes and events handled by Settings while this view
+    // was unmounted. Pending and active captures cannot finish for old devices.
+    stopCapture(); clearDiagnostic(); setPermission("Nicht geprüft");
+  }, [selectedId, deviceRevision, stopCapture, clearDiagnostic]);
 
   useEffect(() => {
     let mounted = true;
@@ -126,13 +133,8 @@ export function MicrophoneSettings({
         if (selectedRef.current && found.length > 0 &&
             !found.some(item => item.id === selectedRef.current)) {
           setError("Das gespeicherte Mikrofon ist nicht angeschlossen. Bitte ausdrücklich ein neues Gerät wählen; kein automatischer Wechsel.");
-          const test = active.current;
-          if (test) {
-            test.aborted = true;
-            try { if (test.recorder.state !== "inactive") test.recorder.stop(); } catch { /* device gone */ }
-            release(test);
-            setPhase("error");
-          }
+          stopCapture(); clearDiagnostic(); setPhase("error");
+          onHardwareTestedRef.current?.(false);
           onUnavailableRef.current();
         }
       } catch (reason) {
@@ -144,7 +146,8 @@ export function MicrophoneSettings({
     };
     const handleChange = () => {
       // The system default can change without changing selectedId.
-      onHardwareTested?.(false);
+      stopCapture(); clearDiagnostic(); setPermission("Geräte geändert · Audiozugriff erneut prüfen");
+      onHardwareTestedRef.current?.(false);
       void inspect();
     };
     void inspect();
@@ -153,8 +156,9 @@ export function MicrophoneSettings({
       if (!mounted) return;
       setPermissionStatus(status);
       if (status === "denied" || status === "restricted") {
+        stopCapture(); clearDiagnostic();
         setAccessEvidence("failed");
-        onHardwareTested?.(false);
+        onHardwareTestedRef.current?.(false);
       }
       setPermission(status === "granted"
         ? "OS meldet erlaubt · Audio-Hardware noch separat prüfen"
@@ -172,7 +176,7 @@ export function MicrophoneSettings({
       media.removeEventListener?.("devicechange", handleChange);
       window.removeEventListener?.("focus", handleFocus);
     };
-  }, [refresh, release]);
+  }, [refresh, stopCapture, clearDiagnostic]);
 
   async function requestPermission() {
     if (startInFlight.current || active.current || running || voiceActive) return;
@@ -195,8 +199,9 @@ export function MicrophoneSettings({
       setResult("Audiozugriff bestätigt. Fahre mit dem unabhängigen Pegel- und Aufnahmetest fort.");
     } catch (reason) {
       if (alive.current && current === generation.current) {
+        clearDiagnostic();
         setAccessEvidence("failed");
-        onHardwareTested?.(false);
+        onHardwareTestedRef.current?.(false);
         setError(microphoneErrorMessage(reason, window.jarvisDesktop?.platform || ""));
       }
     } finally {
@@ -238,7 +243,7 @@ export function MicrophoneSettings({
     try {
       setMode(chosen); setPhase("starting"); setError(""); setResult(""); setLevel(0);
       setSignalSeen(false);
-      if (chosen === "hardware") onHardwareTested?.(false);
+      if (chosen === "hardware") onHardwareTestedRef.current?.(false);
       setTranscript(""); setLatencyMs(null); setFormat("");
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("MediaDevices/getUserMedia nicht verfügbar.");
       stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints(selectedRef.current));
@@ -271,10 +276,9 @@ export function MicrophoneSettings({
       recorder.ondataavailable = e => { if (!test.aborted && e.data.size) test.chunks.push(e.data); };
       recorder.onerror = () => {
         if (!test.aborted && alive.current && test.generation === generation.current) {
-          test.aborted = true;
-          try { if (recorder.state !== "inactive") recorder.stop(); } catch { /* broken recorder */ }
-          release(test);
-          onHardwareTested?.(false);
+          stopCapture(); clearDiagnostic();
+          setAccessEvidence("failed");
+          onHardwareTestedRef.current?.(false);
           setError("MediaRecorder meldet einen Aufnahmefehler.");
           setPhase("error");
         }
@@ -286,16 +290,16 @@ export function MicrophoneSettings({
         setLevel(0);
         setFormat(blob.type + " · " + blob.size + " Bytes");
         if (!blob.size) {
-          onHardwareTested?.(false);
+          clearDiagnostic(); onHardwareTestedRef.current?.(false);
           setError("MediaRecorder hat keine verwertbaren Audio-Daten erzeugt.");
           setPhase("error"); return;
         }
         if (!test.signal) {
-          onHardwareTested?.(false);
+          clearDiagnostic(); onHardwareTestedRef.current?.(false);
           setError("Aufnahme vorhanden, aber kein relevantes Mikrofon-Signal gemessen. Pegel und Eingabegerät prüfen.");
           setPhase("error"); return;
         }
-        onHardwareTested?.(true);
+        onHardwareTestedRef.current?.(true);
         if (test.mode === "hardware") {
           setResult("MediaStream, aktiver Track, Audio-Pegel und nicht-leerer MediaRecorder-Blob bestätigt. Keine Audiodaten hochgeladen.");
           setPhase("complete"); return;
@@ -339,7 +343,9 @@ export function MicrophoneSettings({
         release(test);
       }
       if (alive.current && current === generation.current) {
-        onHardwareTested?.(false);
+        clearDiagnostic();
+        setAccessEvidence("failed");
+        onHardwareTestedRef.current?.(false);
         setError(microphoneErrorMessage(reason, window.jarvisDesktop?.platform || ""));
         setPhase("error");
       }
@@ -359,9 +365,8 @@ export function MicrophoneSettings({
       if (typeof window.setTimeout === "function") {
         test.finalizeTimer = window.setTimeout(() => {
           if (!test.released && test.generation === generation.current) {
-            test.aborted = true;
-            release(test);
-            onHardwareTested?.(false);
+            stopCapture(); clearDiagnostic();
+            onHardwareTestedRef.current?.(false);
             setError("MediaRecorder hat keine Abschlussdaten geliefert. Mikrofon erneut öffnen.");
             setPhase("error");
           }
@@ -369,9 +374,8 @@ export function MicrophoneSettings({
       }
       test.recorder.stop(); // ondataavailable/onstop will finalize the real blob
     } catch (reason) {
-      test.aborted = true;
-      release(test);
-      onHardwareTested?.(false);
+      stopCapture(); clearDiagnostic();
+      onHardwareTestedRef.current?.(false);
       setError(microphoneErrorMessage(reason, window.jarvisDesktop?.platform || ""));
       setPhase("error");
     }

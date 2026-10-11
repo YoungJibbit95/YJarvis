@@ -77,6 +77,10 @@ export function IntelligentSettings({
   const [catalogError, setCatalogError] = useState("");
   const [inventoryStatus, setInventoryStatus] = useState<"checking" | "ready" | "error">("checking");
   const [testedMicId, setTestedMicId] = useState<string | null>(null);
+  const [deviceRevision, setDeviceRevision] = useState(0);
+  const proofEpoch = useRef(0);
+  const selectedMicRef = useRef(selectedMicId);
+  selectedMicRef.current = selectedMicId;
   const micHardwareTested = testedMicId === selectedMicId;
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState("");
@@ -97,6 +101,20 @@ export function IntelligentSettings({
     // A test on a former device is not evidence for a newly chosen microphone.
     setTestedMicId(null);
   }, [selectedMicId]);
+
+  useEffect(() => {
+    // The diagnostic is unmounted in the other Settings sections. Keep the
+    // current-device proof invalidation alive for the entire Settings view.
+    const media = navigator.mediaDevices;
+    if (!media?.addEventListener) return;
+    const handleChange = () => {
+      proofEpoch.current += 1;
+      setTestedMicId(null);
+      setDeviceRevision(value => value + 1);
+    };
+    media.addEventListener("devicechange", handleChange);
+    return () => media.removeEventListener("devicechange", handleChange);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -183,6 +201,7 @@ export function IntelligentSettings({
       setPreview("error"); setPreviewError((reason as Error).message);
     }
   }
+  const renderProofEpoch = proofEpoch.current;
 
   return <section className="panel settings yj-settings-panel">
     <header className="panel-header yj-settings-header">
@@ -280,12 +299,21 @@ export function IntelligentSettings({
           <span className="settings-pill">{setupCheck.report?.stt.status === "available" ? "Whisper bereit laut Setup" : "Whisper nicht bestätigt"}</span>
         </div>
         <p>Prüfe zuerst das Mikrofon. Der Hardwaretest funktioniert auch dann, wenn Whisper noch nicht installiert ist.</p>
-        <MicrophoneSettings selectedId={selectedMicId} onSelect={id => { setTestedMicId(null); onSelectMic(id); }}
-          hardwareTested={micHardwareTested} voiceActive={voiceActive}
-          onDeviceUnavailable={() => { setTestedMicId(null); onMicUnavailable(); }}
+        <MicrophoneSettings selectedId={selectedMicId} onSelect={id => {
+            proofEpoch.current += 1; setTestedMicId(null); onSelectMic(id);
+          }}
+          deviceRevision={deviceRevision} hardwareTested={micHardwareTested} voiceActive={voiceActive}
+          onDeviceUnavailable={() => {
+            proofEpoch.current += 1; setTestedMicId(null); onMicUnavailable();
+          }}
           sttAvailable={setupCheck.report?.stt.status === "available"}
           onStartVoiceTest={onStartVoiceTest} voiceStage={voiceStage}
-          onHardwareTested={passed => setTestedMicId(passed ? selectedMicId : null)} />
+          onHardwareTested={passed => {
+            // A callback from a capture that predates a device event or a
+            // selection change cannot restore the old proof before React rerenders.
+            if (renderProofEpoch !== proofEpoch.current || selectedMicId !== selectedMicRef.current) return;
+            setTestedMicId(passed ? selectedMicId : null);
+          }} />
         <div className="settings-subsection">
           <div className="settings-inline-heading"><h4>Whisper-Modell</h4>
             <button type="button" className="secondary" onClick={() => setReload(n => n + 1)}>Modelle aktualisieren</button>

@@ -1,5 +1,34 @@
 # YJUX-02 — Voice recovery and settings redesign
 
+## PR #43 external review correction
+
+The first PR #43 head left two gaps in microphone evidence handling. The
+Settings view owned the tested device ID, while its `devicechange` listener
+existed only inside the conditional microphone diagnostic. A system-default
+change on another Settings page could therefore leave the overview claiming
+an old hardware success. Settings now listens for device changes throughout
+its own mount, invalidates the proof even when the selected ID is empty, and
+passes a device revision to the diagnostic. Listener cleanup follows the
+Settings and diagnostic mount lifetimes, including React StrictMode replay.
+
+A device event during a capture previously cleared the parent proof without
+ending the recorder generation; a later `onstop` could restore it. The
+diagnostic now invalidates the generation synchronously, stops the recorder,
+releases tracks, AudioContext and timers, and clears access, signal, format,
+transcript and result displays. Delayed recorder callbacks and pending media
+requests cannot restore evidence for a previous device. Device selection,
+OS denial/restriction, access failure and recorder error use the same
+fail-closed state. A new user-started RMS plus nonempty Blob test restores
+readiness. A Whisper-only transcription failure after such a capture leaves
+the independent hardware proof intact while reporting the Whisper failure.
+
+ReactDOM StrictMode tests exercise the real Settings and microphone component
+mounts, section changes, listener cleanup, default-device invalidation,
+permission revocation and retesting with simulated MediaDevices. Focused
+recorder tests delay `onstop` after a device event and verify that no stale
+success appears. These tests do not exercise physical devices, packaged OS
+privacy prompts or actual microphone audio; those remain **NOT RUN**.
+
 ## Post-merge review corrections
 
 PR [#41](https://github.com/YoungJibbit95/YJarvis/pull/41) was merged into
