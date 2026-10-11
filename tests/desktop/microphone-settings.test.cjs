@@ -27,7 +27,8 @@ async function rig({ selectedId = "", sttAvailable = false, level = 175,
     { kind: "audioinput", deviceId: "mic-2", label: "USB Mic" },
     { kind: "videoinput", deviceId: "camera", label: "Camera" }
   ];
-  let deviceDisconnected = 0;
+  let deviceDisconnected = 0, mediaError = getUserMediaError, transcriptError = null;
+  let nativeStatus = "not-determined";
   const ReactMock = {
     ...React,
     useState(initial) {
@@ -86,7 +87,7 @@ async function rig({ selectedId = "", sttAvailable = false, level = 175,
     async enumerateDevices() { return devices; },
     async getUserMedia(constraints) {
       calls.push(JSON.parse(JSON.stringify(constraints)));
-      if (getUserMediaError) throw getUserMediaError;
+      if (mediaError) throw mediaError;
       return stream;
     },
     addEventListener(name, fn) { listeners.set(name, fn); },
@@ -94,7 +95,7 @@ async function rig({ selectedId = "", sttAvailable = false, level = 175,
   };
   const window = {
     AudioContext: Context, jarvisDesktop: {
-      platform: "win32", microphoneStatus: async () => "not-determined",
+      platform: "win32", microphoneStatus: async () => nativeStatus,
       openMicrophonePrivacySettings: async () => true
     },
     setInterval(callback) { const id = ++timerId; timers.set(id, callback); return id; },
@@ -103,6 +104,7 @@ async function rig({ selectedId = "", sttAvailable = false, level = 175,
   const api = {
     async transcribe(blob) {
       transcripts.push(blob);
+      if (transcriptError) throw transcriptError;
       return { text: "Test erkannt", latency_ms: 45, language: "de" };
     }
   };
@@ -110,9 +112,11 @@ async function rig({ selectedId = "", sttAvailable = false, level = 175,
     react: ReactMock, "../api": api, "./microphoneDevices": micUtils,
   }, { window, navigator: { mediaDevices: media }, MediaRecorder: Recorder, Blob, Error });
 
-  const props = { selectedId, sttAvailable, voiceActive: false,
+  const props = { selectedId, sttAvailable, hardwareTested: false, voiceActive: false,
+    onStartVoiceTest() {},
     onSelect(id) { props.selectedId = id; dirty = true; },
-    onDeviceUnavailable() { deviceDisconnected++; }
+    onDeviceUnavailable() { deviceDisconnected++; },
+    onHardwareTested(passed) { props.hardwareTested = passed; dirty = true; }
   };
 
   async function settle() {
@@ -140,6 +144,9 @@ async function rig({ selectedId = "", sttAvailable = false, level = 175,
     props, tracks, recorders, contexts, calls, transcripts, timers, listeners, settle, button, status,
     tick() { for (const fn of timers.values()) fn(); },
     devices(next) { devices = next; listeners.get("devicechange")?.(); },
+    nativePermission(status) { nativeStatus = status; },
+    failAccess(error) { mediaError = error; },
+    failTranscription(error) { transcriptError = error; },
     disconnected: () => deviceDisconnected,
     visibleText: () => readableText(tree),
     unmount() { slots.forEach(slot => slot?.cleanup?.()); },
@@ -159,6 +166,7 @@ test("microphone hardware test is available without Whisper and never submits ch
   h.button("Test beenden").props.onClick();
   await h.settle();
   assert.match(h.status(), /nicht-leerer MediaRecorder-Blob/);
+  assert.equal(h.props.hardwareTested, true);
   assert.equal(h.transcripts.length, 0);
   assert.equal(h.tracks[0].stopped, true);
   assert.equal(h.contexts[0].closed, true);
@@ -174,6 +182,7 @@ test("Whisper test transcribes locally but does not send a chat request", async 
   assert.match(h.status(), /Test erkannt/);
   assert.match(h.visibleText(), /Whisper-Latenz: 45 ms/);
   assert.equal(h.tracks[0].stopped, true);
+  assert.equal(h.props.hardwareTested, true, "RMS and Blob verify hardware in either capture mode");
 });
 
 test("permission rejection and missing devices have distinct actionable states", async () => {
@@ -202,7 +211,55 @@ test("no signal and empty blobs are not treated as successful hardware tests", a
     h.button("Test beenden").props.onClick(); await h.settle();
     assert.match(h.status(), /kein relevantes Mikrofon-Signal|keine verwertbaren Audio-Daten/);
     assert.equal(h.transcripts.length, 0);
+    assert.equal(h.props.hardwareTested, false);
   }
+});
+
+test("new access denial clears hardware evidence but Whisper transcription failure preserves it", async () => {
+  const h = await rig({ sttAvailable: true });
+  h.button("Mikrofon testen").props.onClick(); await h.settle();
+  h.tick(); await h.settle();
+  h.button("Test beenden").props.onClick(); await h.settle();
+  assert.equal(h.props.hardwareTested, true);
+  assert.equal(h.button("Voice-Test starten").props.disabled, false);
+
+  h.failTranscription(new Error("Whisper unavailable"));
+  h.button("Spracherkennung testen").props.onClick(); await h.settle();
+  h.tick(); await h.settle();
+  h.button("Test beenden").props.onClick(); await h.settle();
+  assert.match(h.visibleText(), /Whisper-Test fehlgeschlagen/);
+  assert.equal(h.props.hardwareTested, true);
+  assert.equal(h.button("Voice-Test starten").props.disabled, false);
+
+  const denied = new Error("denied"); denied.name = "NotAllowedError";
+  h.failAccess(denied);
+  h.button("Mikrofonzugriff anfordern").props.onClick(); await h.settle();
+  assert.equal(h.props.hardwareTested, false);
+  assert.equal(h.button("Voice-Test starten").props.disabled, true);
+  assert.equal(h.recorders.length, 2, "denied access cannot create another recorder");
+});
+
+test("permission revocation and devicechange invalidate prior evidence", async () => {
+  const h = await rig({ sttAvailable: true });
+  h.button("Mikrofon testen").props.onClick(); await h.settle();
+  h.tick(); await h.settle();
+  h.button("Test beenden").props.onClick(); await h.settle();
+  assert.equal(h.props.hardwareTested, true);
+
+  h.nativePermission("denied");
+  h.button("Berechtigung erneut prüfen").props.onClick(); await h.settle();
+  assert.equal(h.props.hardwareTested, false);
+  assert.equal(h.button("Voice-Test starten").props.disabled, true);
+
+  h.nativePermission("granted");
+  h.button("Berechtigung erneut prüfen").props.onClick(); await h.settle();
+  assert.equal(h.props.hardwareTested, false, "a permission report cannot restore hardware proof");
+  h.button("Mikrofon testen").props.onClick(); await h.settle();
+  h.tick(); await h.settle();
+  h.button("Test beenden").props.onClick(); await h.settle();
+  assert.equal(h.props.hardwareTested, true);
+  h.devices([{ kind: "audioinput", deviceId: "mic-2", label: "USB Mic" }]); await h.settle();
+  assert.equal(h.props.hardwareTested, false, "system default may change without a selected ID");
 });
 
 test("stop/unmount releases tracks and never permits simultaneous recorders", async () => {

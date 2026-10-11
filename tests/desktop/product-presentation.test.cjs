@@ -91,7 +91,7 @@ function nodes(node) {
 async function appHarness(apiOverrides = {}) {
   const slots = [], effects = [], sockets = [], timers = new Map();
   let cursor = 0, dirty = true, tree, timerId = 0;
-  let confirmAllowed = false, confirmCount = 0;
+  let confirmAllowed = false, confirmCount = 0, mediaRequests = 0;
   const hooks = {
     ...React, memo: (component) => component,
     useState(initial) {
@@ -140,7 +140,10 @@ async function appHarness(apiOverrides = {}) {
     "./voice/microphoneDevices": load("../voice/microphoneDevices.ts")
   }, {
     Error, WebSocket: Socket,
-    navigator: { mediaDevices: { getUserMedia: async () => { throw new Error("Microphone denied"); } } },
+    navigator: { mediaDevices: { getUserMedia: async () => {
+      mediaRequests++;
+      throw new Error("Microphone denied");
+    } } },
     window: { addEventListener() {}, removeEventListener() {},
       confirm() { confirmCount++; return confirmAllowed; },
       setTimeout(callback, delay) { const id = ++timerId; timers.set(id, { callback, delay }); return id; },
@@ -161,6 +164,7 @@ async function appHarness(apiOverrides = {}) {
   return { sockets, api, settle, find,
     allowLeavingDirtySettings(value) { confirmAllowed = value; },
     confirmCount: () => confirmCount,
+    mediaRequests: () => mediaRequests,
     feedback: () => find((node) => node.type === AppFeedback).props,
     presence: () => find((node) => node.type === PresenceStage).props,
     diagnostic: () => find((node) => node.props?.className === "connection-details"),
@@ -256,6 +260,29 @@ test("leaving Settings with an unsaved model choice requires an explicit decisio
 
   app.allowLeavingDirtySettings(true);
   shell().props.onNavigate("chat"); await app.settle();
+  assert.equal(shell().props.activeTab, "chat");
+  assert.equal(app.confirmCount(), 2);
+});
+
+test("Settings Voice test waits for accepted navigation and starts capture once", async () => {
+  const app = await appHarness();
+  app.sockets[0].open(); await app.settle();
+  const shell = () => app.find(node => node.props?.onNavigate && node.props?.activeTab);
+  const settings = () => app.find(node => node.props?.setDraft && node.props?.onStartVoiceTest);
+  shell().props.onNavigate("settings"); await app.settle();
+  settings().props.setDraft(previous => ({ ...previous, model_name: "unsaved-model" }));
+  await app.settle();
+
+  settings().props.onStartVoiceTest(); await app.settle();
+  assert.equal(shell().props.activeTab, "settings");
+  assert.equal(app.mediaRequests(), 0, "rejected navigation must not open the microphone");
+  assert.equal(app.confirmCount(), 1);
+
+  app.allowLeavingDirtySettings(true);
+  settings().props.onStartVoiceTest();
+  settings().props.onStartVoiceTest();
+  assert.equal(app.mediaRequests(), 1, "the in-flight guard permits one Voice start");
+  await app.settle();
   assert.equal(shell().props.activeTab, "chat");
   assert.equal(app.confirmCount(), 2);
 });

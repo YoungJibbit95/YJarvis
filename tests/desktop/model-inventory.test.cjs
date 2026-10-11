@@ -67,7 +67,7 @@ async function harness(inventoryResponse = actualInventory) {
       props.settings = JSON.parse(JSON.stringify(props.draft));
       dirty = true;
     },
-    onConfigured: () => {}, selectedMicId: "", onSelectMic: () => {},
+    onConfigured: () => {}, selectedMicId: "", onSelectMic: id => { props.selectedMicId = id; dirty = true; },
     voiceActive: false, onMicUnavailable: () => {}, allowlistInput: "",
     onAllowlistInput: () => {}, onAddPath: () => {}, onRemovePath: () => {},
   };
@@ -224,6 +224,20 @@ test("overview is the initial Settings page with runtime-backed actionable statu
   await h.settle();
   h.click("Übersicht"); await h.settle();
   assert.match(h.text(), /Hardwaretest erfolgreich/);
+  h.click("Mikrofon einrichten"); await h.settle();
+  const reopened = h.nodes().find(n => n.type?.name === "Mic");
+  assert.equal(reopened.props.hardwareTested, true, "reopened diagnostic uses overview evidence");
+  reopened.props.onSelect("mic-2"); await h.settle();
+  assert.equal(h.nodes().find(n => n.type?.name === "Mic").props.hardwareTested, false);
+  h.click("Übersicht"); await h.settle();
+  assert.match(h.text(), /Hardware noch nicht getestet/);
+  h.click("Mikrofon einrichten"); await h.settle();
+  h.nodes().find(n => n.type?.name === "Mic").props.onHardwareTested(true);
+  await h.settle();
+  h.nodes().find(n => n.type?.name === "Mic").props.onDeviceUnavailable();
+  await h.settle();
+  h.click("Übersicht"); await h.settle();
+  assert.match(h.text(), /Hardware noch nicht getestet/);
 });
 
 test("installed and catalog chat models have separate real-data selection and explicit install flow", async () => {

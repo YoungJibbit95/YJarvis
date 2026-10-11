@@ -76,7 +76,8 @@ export function IntelligentSettings({
   const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
   const [catalogError, setCatalogError] = useState("");
   const [inventoryStatus, setInventoryStatus] = useState<"checking" | "ready" | "error">("checking");
-  const [micHardwareTested, setMicHardwareTested] = useState(false);
+  const [testedMicId, setTestedMicId] = useState<string | null>(null);
+  const micHardwareTested = testedMicId === selectedMicId;
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState("");
   const [preview, setPreview] = useState<"idle" | "playing" | "done" | "error">("idle");
@@ -87,11 +88,14 @@ export function IntelligentSettings({
     // Keep opened install options and switched sections immediately visible in
     // the scrollable content area, without moving the surrounding app shell.
     contentRef.current?.scrollTo?.({ top: 0, behavior: "auto" });
+    // Compact windows scroll the surrounding view instead of nesting a tiny
+    // Settings scroller; bring the newly selected section into view there too.
+    contentRef.current?.closest(".active-view")?.scrollTo?.({ top: 0, behavior: "auto" });
   }, [section, installerOpen, installTarget?.category, installTarget?.model]);
 
   useEffect(() => {
     // A test on a former device is not evidence for a newly chosen microphone.
-    setMicHardwareTested(false);
+    setTestedMicId(null);
   }, [selectedMicId]);
 
   useEffect(() => {
@@ -276,11 +280,12 @@ export function IntelligentSettings({
           <span className="settings-pill">{setupCheck.report?.stt.status === "available" ? "Whisper bereit laut Setup" : "Whisper nicht bestätigt"}</span>
         </div>
         <p>Prüfe zuerst das Mikrofon. Der Hardwaretest funktioniert auch dann, wenn Whisper noch nicht installiert ist.</p>
-        <MicrophoneSettings selectedId={selectedMicId} onSelect={onSelectMic} voiceActive={voiceActive}
-          onDeviceUnavailable={() => { setMicHardwareTested(false); onMicUnavailable(); }}
+        <MicrophoneSettings selectedId={selectedMicId} onSelect={id => { setTestedMicId(null); onSelectMic(id); }}
+          hardwareTested={micHardwareTested} voiceActive={voiceActive}
+          onDeviceUnavailable={() => { setTestedMicId(null); onMicUnavailable(); }}
           sttAvailable={setupCheck.report?.stt.status === "available"}
           onStartVoiceTest={onStartVoiceTest} voiceStage={voiceStage}
-          onHardwareTested={setMicHardwareTested} />
+          onHardwareTested={passed => setTestedMicId(passed ? selectedMicId : null)} />
         <div className="settings-subsection">
           <div className="settings-inline-heading"><h4>Whisper-Modell</h4>
             <button type="button" className="secondary" onClick={() => setReload(n => n + 1)}>Modelle aktualisieren</button>
