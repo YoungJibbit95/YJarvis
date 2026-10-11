@@ -579,3 +579,26 @@ test("memoized Command Palette and Chat button always use the latest selected mi
   assert.equal(app.recorders.length, 2, "no concurrent duplicate recorder");
   await app.stop();
 });
+
+test("Settings Voice test starts one real recorder only after dirty navigation is accepted", async () => {
+  const app = await makeHarness();
+  const shell = () => app.find(node => node.props?.onNavigate && node.props?.activeTab);
+  const settings = () => app.find(node => node.props?.setDraft && node.props?.onStartVoiceTest);
+  shell().props.onNavigate("settings"); await app.settle();
+  settings().props.setDraft(previous => ({ ...previous, model_name: "unsaved-model" }));
+  await app.settle();
+
+  settings().props.onStartVoiceTest(); await app.settle();
+  assert.equal(shell().props.activeTab, "settings");
+  assert.equal(app.mediaCalls.length, 0);
+  assert.equal(app.recorders.length, 0);
+
+  app.setConfirmedRetry(true);
+  settings().props.onStartVoiceTest();
+  settings().props.onStartVoiceTest();
+  await app.settle();
+  assert.equal(shell().props.activeTab, "chat");
+  assert.equal(app.mediaCalls.length, 1);
+  assert.equal(app.recorders.length, 1, "accepted navigation starts Voice exactly once");
+  await app.stop();
+});
