@@ -40,7 +40,7 @@ is changed at this checkpoint.
 
 ## Implementation boundary
 
-The planned pilot is only successful `open_app` and `open_url` results. Both are
+The pilot is only successful `open_app` and `open_url` results. Both are
 registered legacy tools with compact outputs; their real implementations were
 inspected. `open_app` normalizes aliases and may retry the original app spelling;
 `open_url` accepts HTTP(S). Both currently invoke the legacy macOS `open` command.
@@ -50,12 +50,97 @@ window, web content or network load was independently inspected.
 Notes, reminders and calendar listings can contain sensitive, lengthy content
 and stay outside this pilot, as do all other actions. No providers, routing,
 approval policy, database schema, API/settings DTOs, UI, voice or CI workflows
-will change. The reply reaches the existing UI through the existing message event.
+change. The reply reaches the existing UI through the existing message event.
 
-The next checkpoint will add a bounded text-only completion after persisted
-success, local-endpoint gating, bounded input/output, safe optional same-run
-intent context, persona, explicit execution status and deterministic fallback.
-There will be no tool descriptions, additional execution or automatic retries.
+## Checkpoint CORE-B: narration contract
+
+`JARVIS_TOOL_SUMMARY_VIA_LLM` now defaults to `1`. Explicit `0` (or another value
+outside `1/true/yes/on`) restores the existing deterministic completion after a
+backend restart. Explicit `1` is now also restricted to this two-tool pilot;
+it no longer requests summaries for arbitrary successful tools.
+
+Only a persisted successful `ToolResult` enters the presentation boundary. The
+prompt carries the actual name, bounded validated input, actual output, explicit
+`execution_status: success` and the existing persona. Tool data and optional user
+intent are JSON-encoded as evidence, with instructions never to follow embedded
+commands or claim any additional execution or independently inspected app/site.
+
+Optional intent is kept in memory for at most 128 pending approvals, at most 500
+characters each. It is keyed by approval ID and checked against both session and
+run IDs when consumed, including delayed approvals. Denial/approval consumes it;
+eviction, restart or mismatched IDs mean no intent is supplied. No history/memory
+lookup is used to guess the request. Existing persistence and approval semantics
+are unchanged; this cache is not an authorization mechanism.
+
+The narrow input boundary requires exactly `app_name` (1–80 characters) or `url`
+(1–2048 characters), nonempty output at most 4096 characters and no control
+characters. URL narration excludes non-HTTP(S), invalid hosts/ports, credentials,
+query strings and fragments. Extra fields and oversized content use the technical
+path rather than truncating evidence or sending unrelated data. The persona is
+limited to 8000 characters; an oversized persona also uses the technical path.
+
+The completion goes only to literal `127.0.0.1`, `::1`, or `localhost` (canonicalized
+to `127.0.0.1` without DNS). Credentials, endpoint paths/query/fragment, HTTP proxy
+environment settings, redirects and known `:cloud`/`-cloud` model names are excluded.
+This is separate from ordinary chat's existing endpoint configuration. No new
+provider, discovery request or classification call is added.
+
+Exactly one nonstreaming completion is attempted per eligible completed result:
+8-second total async timeout, 8-second HTTP read timeout, temperature 0.1,
+`num_predict=256`, existing `JARVIS_OLLAMA_KEEP_ALIVE`, and no tool descriptions.
+The total deadline includes connect/write/read/pool waits. There is no automatic
+retry. A completed assistant text response is required. Tool/function calls,
+malformed envelopes, token-limit termination, blank/non-string content, text over
+1200 characters, control characters and structured/code-shaped replies are rejected.
+The existing honorific normalization still applies to accepted model text; no
+intro or Python-authored action summary is prepended.
+
+The [Ollama chat API](https://docs.ollama.com/api/chat) supplies `message`, `done`,
+`done_reason`, optional tool calls and keep-alive. The stricter completion option
+is used only for narration; existing chat/planner completion behavior is preserved.
+
+### Exact fallback and outcome integrity
+
+- Disabled, excluded tool/input/output, remote endpoint or known cloud model:
+  `Aktion abgeschlossen (<tool>). Ergebnis: <actual output>`.
+- Attempted narration fails, times out or returns invalid content:
+  `Tool \`<tool>\` ausgefuehrt. Ergebnis: <actual output>`.
+- Failed execution stays on the existing error path without a narration request:
+  `Tool fehlgeschlagen (<tool>): <actual error>` with terminal `error`.
+- Denial stays on the existing no-execution path. No tool result is invented.
+
+The model never receives execution authority. Its response cannot update the
+stored tool run, learning outcome, approval, run ID or session ID, invoke another
+tool, or cause an action retry. `finish` still produces exactly one stored and
+published assistant message followed by the existing terminal state.
+
+## Verification and limitations
+
+Tests use the existing real temporary SQLite fixture, the real registry/tool
+implementations with only the OS subprocess boundary replaced, and the actual
+HTTP completion parser with a controlled transport. They cover persistence before
+narration, default-on/explicit-off, two different model-authored answers, both
+pilot tools, denial/failure, unchanged IDs/events, single message, duplicate
+decisions, session/run isolation, restart/eviction, timeouts, nonlocal endpoints,
+sensitive/oversized data, invalid model output and forbidden model tool calls.
+
+The wording is model-generated. Shape validation and prompting cannot prove the
+truth of arbitrary natural-language claims; the durable execution result remains
+authoritative. No claim of hallucination-proof prose is made. Loopback transport
+and known cloud-name exclusion cannot attest that a user-installed local server
+or a renamed model itself forwards no data; a real local Ollama/model is assumed.
+This PR does not port the legacy macOS tools to Windows or certify app/window
+state. Native tool/model/hardware end-to-end checks: **NOT RUN**. Real model and
+hardware latency: **NOT MEASURED**.
+
+CORE-A: focused characterization/lifecycle tests **58 passed** before runtime
+changes. Final local and GitHub results are recorded in the PR handoff.
+
+Rollback: set `JARVIS_TOOL_SUMMARY_VIA_LLM=0` in the backend process environment
+and restart, or revert the PR. No settings, user data or database migration is
+required. Ordinary conversation, routing, voice and approvals keep their existing
+paths. YJCORE-02 capability discovery and YJCORE-03 model-driven selection are
+separate future authorizations, not work in this PR.
 
 ## Existing out-of-scope observations
 
