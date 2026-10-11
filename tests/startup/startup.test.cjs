@@ -275,11 +275,12 @@ test("Electron retains macOS activation and waits through repeated quit events",
         askForMediaAccess: async () => false },
         protocol: { registerSchemesAsPrivileged() {} },
         Menu: { setApplicationMenu() { throw new Error("macOS must retain its system app menu"); } },
-        ipcMain: { on() {}, handle() {} } };
+        ipcMain: { on() {}, handle() {} }, shell: { openExternal: async () => {}, openPath: async () => "" } };
       if (name === "path") return path;
       if (name === "node:url") return require(name);
       if (name === "./packaged.cjs") return require("../../apps/desktop/electron/packaged.cjs");
       if (name === "./microphone-permissions.cjs") return require("../../apps/desktop/electron/microphone-permissions.cjs");
+      if (name === "./microphone-recovery.cjs") return require("../../apps/desktop/electron/microphone-recovery.cjs");
       assert.equal(name, "../../../scripts/startup.cjs");
       return { OwnedProcesses: function () { return owner; }, startBackend: async (actualOwner, actualRoot, options) => {
         assert.equal(actualOwner, owner);

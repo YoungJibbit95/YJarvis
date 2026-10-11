@@ -35,6 +35,12 @@ function nodes(node) {
   return [node, ...nodes(node.props?.children)];
 }
 
+function visibleText(node) {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(visibleText).join("");
+  return node && typeof node === "object" ? visibleText(node.props?.children) : "";
+}
+
 function settings() {
   return {
     model_name: "model-a:latest", ollama_base_url: "http://127.0.0.1:11434",
@@ -55,7 +61,12 @@ async function harness(inventoryResponse = actualInventory) {
       dirty = true;
     },
     setupCheck: { state: "degraded", backendReachable: true },
-    sayVoices: [], onRefreshVoices: async () => {}, onSave: async () => { writes.push(JSON.parse(JSON.stringify(props.draft))); },
+    sayVoices: [], onRefreshVoices: async () => {},
+    onSave: async () => {
+      writes.push(JSON.parse(JSON.stringify(props.draft)));
+      props.settings = JSON.parse(JSON.stringify(props.draft));
+      dirty = true;
+    },
     onConfigured: () => {}, selectedMicId: "", onSelectMic: () => {},
     voiceActive: false, onMicUnavailable: () => {}, allowlistInput: "",
     onAllowlistInput: () => {}, onAddPath: () => {}, onRemovePath: () => {},
@@ -86,6 +97,18 @@ async function harness(inventoryResponse = actualInventory) {
       if (inventoryResponse instanceof Error) throw inventoryResponse;
       return parseModelInventory(inventoryResponse);
     },
+    async fetchInstallOptions() {
+      return { whisper_models: ["tiny", "base", "small"],
+        voices: [{ id: "de_DE-new-medium", name: "Deutsch · Neue Stimme · medium" }] };
+    },
+    async fetchModelCatalog() {
+      return [{
+        id: "curated-chat", category: "chat", display_name: "Bekanntes Modell",
+        runtime: { backend: "ollama", model_id: "catalog-chat:latest" },
+        acquisition: { approximate_download_bytes: 1300000000 },
+        source: { publisher: "Geprüfter Katalog" },
+      }];
+    },
     async speak() { throw new Error("Only saved TTS allowed"); }
   };
   const { IntelligentSettings } = load("../settings/IntelligentSettings.tsx", {
@@ -110,8 +133,9 @@ async function harness(inventoryResponse = actualInventory) {
   return {
     props, writes, reads, settle, nodes: () => nodes(tree),
     text: () => JSON.stringify(tree),
+    installer: () => nodes(tree).find(n => typeof n.type === "function" && n.type.name === "Installer"),
     click(label) {
-      const b = nodes(tree).find(n => n.type === "button" && JSON.stringify(n.props.children).includes(label));
+      const b = nodes(tree).find(n => n.type === "button" && visibleText(n.props.children).includes(label));
       assert.ok(b, "Missing button: " + label);
       b.props.onClick();
     },
@@ -182,4 +206,95 @@ test("model inventory failure stays actionable with retry and does not mutate dr
   h.click("Erneut versuchen"); await h.settle();
   assert.ok(h.reads.length >= 2);
   assert.equal(JSON.stringify(h.props.draft), before);
+});
+
+
+test("overview is the initial Settings page with runtime-backed actionable status cards", async () => {
+  const h = await harness();
+  assert.match(h.text(), /So ist dein Jarvis eingerichtet/);
+  assert.match(h.text(), /Hardware noch nicht getestet/);
+  assert.match(h.text(), /Ollama erreichbar/);
+  assert.match(h.text(), /Mikrofon einrichten/);
+  h.click("Mikrofon einrichten");
+  await h.settle();
+  assert.match(h.text(), /Whisper CLI/);
+  const microphone = h.nodes().find(n => n.type?.name === "Mic");
+  assert.ok(microphone, "active input screen must contain the actual diagnostic component");
+  microphone.props.onHardwareTested(true);
+  await h.settle();
+  h.click("Übersicht"); await h.settle();
+  assert.match(h.text(), /Hardwaretest erfolgreich/);
+});
+
+test("installed and catalog chat models have separate real-data selection and explicit install flow", async () => {
+  const h = await harness();
+  h.click("KI & Modelle"); await h.settle();
+  assert.match(h.text(), /Installiert · Inferenz ungeprüft/);
+  assert.match(h.text(), /model-b:latest/);
+  assert.match(h.text(), /Bekanntes Modell/);
+  assert.match(h.text(), /installierbar, nicht installiert/);
+  h.click("Installation vorbereiten"); await h.settle();
+  assert.match(h.text(), /Erst dein Klick/);
+  assert.equal(h.installer()?.props.initialSelection?.chat_model, "catalog-chat:latest");
+  assert.equal(h.writes.length, 0, "opening setup never changes saved user settings");
+});
+
+test("Whisper and Piper installation cards prefill the existing installer without downloading", async () => {
+  const h = await harness();
+  h.click("Spracheingabe"); await h.settle();
+  assert.match(h.text(), /Installierte Whisper-Modelle/);
+  assert.match(h.text(), /Weitere Whisper-Varianten/);
+  h.click("tiny installieren"); await h.settle();
+  assert.equal(h.installer()?.props.initialSelection?.whisper_model, "tiny");
+  assert.equal(h.writes.length, 0);
+  h.click("Sprachausgabe"); await h.settle();
+  assert.match(h.text(), /Installierte Stimmenbibliothek/);
+  h.click("Stimme installieren"); await h.settle();
+  assert.equal(h.installer()?.props.initialSelection?.voice, "de_DE-new-medium");
+  assert.equal(h.writes.length, 0);
+});
+
+test("save and discard are explicit and never erase custom allowed paths", async () => {
+  const h = await harness();
+  h.click("KI & Modelle"); await h.settle();
+  const select = h.nodes().find(n => n.type === "select" && n.props.value === "model-a:latest");
+  select.props.onChange({ target: { value: "model-b:latest" } });
+  await h.settle();
+  assert.match(h.text(), /Nicht gespeicherte Änderungen/);
+  h.click("Verwerfen"); await h.settle();
+  assert.equal(h.props.draft.model_name, "model-a:latest");
+  assert.deepEqual(h.props.draft.allowed_paths, ["/own/workspace"]);
+  assert.equal(h.writes.length, 0);
+  h.click("Modell wählen"); await h.settle();
+  assert.equal(h.props.draft.model_name, "model-b:latest");
+  h.click("Änderungen speichern"); await h.settle();
+  assert.equal(h.props.settings.model_name, "model-b:latest");
+  assert.deepEqual(h.writes[0].allowed_paths, ["/own/workspace"]);
+  assert.match(h.text(), /Einstellungen gespeichert/);
+});
+
+test("overview and navigation do not automatically invoke installation or make fake audio claims", async () => {
+  const h = await harness();
+  assert.doesNotMatch(h.text(), /Mikrofon funktioniert bereits/);
+  h.click("Komponenten installieren"); await h.settle();
+  assert.match(h.text(), /Vorhandenen Installer verwenden/);
+  assert.equal(h.writes.length, 0);
+  h.click("Einrichtung schließen"); await h.settle();
+  assert.equal(h.installer(), undefined);
+});
+
+
+test("save failure remains visible and keeps unsaved custom and safety values", async () => {
+  const h = await harness();
+  h.click("KI & Modelle"); await h.settle();
+  const select = h.nodes().find(n => n.type === "select" && n.props.value === "model-a:latest");
+  select.props.onChange({ target: { value: "model-b:latest" } }); await h.settle();
+  h.props.onSave = async () => { throw new Error("Speicherverbindung unterbrochen"); };
+  h.click("Übersicht"); await h.settle(); // rerender with the failing save implementation
+  h.click("Änderungen speichern"); await h.settle();
+  assert.match(h.text(), /Speichern fehlgeschlagen/);
+  assert.match(h.text(), /Speicherverbindung unterbrochen/);
+  assert.equal(h.props.draft.model_name, "model-b:latest");
+  assert.deepEqual(h.props.draft.allowed_paths, ["/own/workspace"]);
+  assert.equal(h.writes.length, 0);
 });

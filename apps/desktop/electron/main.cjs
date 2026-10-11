@@ -1,4 +1,4 @@
-const { app, BrowserWindow, protocol, net, dialog, Menu, ipcMain, session, systemPreferences } = require("electron");
+const { app, BrowserWindow, protocol, net, dialog, Menu, ipcMain, session, systemPreferences, shell } = require("electron");
 const path = require("path");
 const { pathToFileURL } = require("node:url");
 const { OwnedProcesses, startBackend, waitForHealth, ensureOllama, ollamaUrl } = require(app.isPackaged
@@ -6,6 +6,7 @@ const { OwnedProcesses, startBackend, waitForHealth, ensureOllama, ollamaUrl } =
   : "../../../scripts/startup.cjs");
 const { startPackagedBackend, rendererFile } = require("./packaged.cjs");
 const { installMicrophonePermissions, isTrustedRenderer, nativeMicStatus } = require("./microphone-permissions.cjs");
+const { registerMicrophonePrivacyNavigation } = require("./microphone-recovery.cjs");
 
 protocol.registerSchemesAsPrivileged([{
   scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
@@ -87,6 +88,10 @@ process.on("SIGINT", () => app.quit());
 process.on("SIGTERM", () => app.quit());
 
 app.whenReady().then(async () => {
+  registerMicrophonePrivacyNavigation(ipcMain, {
+    packaged: app.isPackaged, platform: process.platform, shell,
+    getWindows: () => BrowserWindow.getAllWindows()
+  });
   installMicrophonePermissions(session.defaultSession, {
     packaged: app.isPackaged, platform: process.platform, systemPreferences,
     getWindows: () => BrowserWindow.getAllWindows()

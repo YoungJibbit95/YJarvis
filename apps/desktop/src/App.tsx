@@ -478,6 +478,10 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
   const [allowlistInput, setAllowlistInput] = useState("");
   const [sayVoices, setSayVoices] = useState<string[]>([]);
   const [selectedMicrophoneId, setSelectedMicrophoneId] = useState(readMicrophonePreference);
+  // One mutable authoritative selection for Chat, memoized Command Palette,
+  // and Voice restarts/resumes. A stale closure can never select an old device.
+  const selectedMicrophoneIdRef = useRef(selectedMicrophoneId);
+  selectedMicrophoneIdRef.current = selectedMicrophoneId;
 
   useEffect(() => { persistMicrophonePreference(selectedMicrophoneId); }, [selectedMicrophoneId]);
 
@@ -1265,7 +1269,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
     let context: AudioContext | null = null;
     try {
       setVoiceStage("Mikrofon wird initialisiert");
-      stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints(selectedMicrophoneId));
+      stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints(selectedMicrophoneIdRef.current));
       stream.getAudioTracks?.().forEach(track => track.addEventListener?.("ended", () => {
         if (voiceModeEnabledRef.current && mediaStreamRef.current === stream) {
           stopVoiceModeInternal({ updateStatus: true });
@@ -1340,11 +1344,15 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
 
   const switchTab = useCallback(
     (tab: TabId) => {
-      startTabTransition(() => {
-        setActiveTab(tab);
-      });
+      if (activeTab === "settings" && tab !== "settings" &&
+          JSON.stringify(settingsDraft) !== JSON.stringify(settings) &&
+          typeof window.confirm === "function" &&
+          !window.confirm("Du hast ungespeicherte Einstellungen. Ohne Speichern bleiben sie als Entwurf erhalten. Trotzdem den Bereich verlassen?")) {
+        return;
+      }
+      startTabTransition(() => { setActiveTab(tab); });
     },
-    [startTabTransition]
+    [startTabTransition, activeTab, settings, settingsDraft]
   );
 
   const handleSpeakMessage = useCallback((content: string) => {
@@ -1417,7 +1425,7 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
         run: () => setVoiceRepliesEnabled((previous) => !previous)
       }
     ];
-  }, [voiceModeEnabled, voiceRepliesEnabled, switchTab, sessionId, busy, chatAvailable, sttUnavailable]);
+  }, [voiceModeEnabled, voiceRepliesEnabled, selectedMicrophoneId, switchTab, sessionId, busy, chatAvailable, sttUnavailable]);
 
   const filteredCommandItems = useMemo(() => {
     const query = commandQuery.trim().toLowerCase();
@@ -1762,6 +1770,8 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       void onRecheckSetup();
     } catch (error) {
       reportFailure("action", "Einstellungen konnten nicht gespeichert werden", error);
+      // Keep the draft and propagate the result to the Settings save/status UI.
+      throw error;
     }
   }
 
@@ -1978,9 +1988,16 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
         if (voiceModeEnabledRef.current || voiceStartInProgressRef.current) {
           stopVoiceModeInternal({ updateStatus: true });
         }
+        selectedMicrophoneIdRef.current = id;
         setSelectedMicrophoneId(id);
       }}
       voiceActive={voiceModeEnabled}
+      voiceStage={voiceStage}
+      onStartVoiceTest={() => {
+        if (voiceModeEnabledRef.current || voiceStartInProgressRef.current) return;
+        switchTab("chat");
+        void startVoiceMode();
+      }}
       onMicUnavailable={() => {
         if (voiceModeEnabledRef.current || voiceStartInProgressRef.current) {
           stopVoiceModeInternal({ updateStatus: true });

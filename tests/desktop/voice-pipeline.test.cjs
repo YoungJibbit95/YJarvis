@@ -17,7 +17,7 @@ async function makeHarness(overrides = {}) {
   let cursor = 0, dirty = true, tree, timerSeq = 0, clock = 1000;
   let level = 128, rejectResume = false, confirmedRetry = false;
   let setupCheck = { state: "degraded", backendReachable: true };
-  const slots = [], effects = [], timers = new Map(), frames = [], recorders = [], tracks = [], sends = [], transcriptions = [], sockets = [];
+  const slots = [], effects = [], timers = new Map(), frames = [], recorders = [], tracks = [], sends = [], transcriptions = [], sockets = [], mediaCalls = [];
   const mockReact = {
     ...React, memo: (component) => component,
     useState(init) {
@@ -29,7 +29,14 @@ async function makeHarness(overrides = {}) {
       }];
     },
     useRef(value) { return slots[cursor++] ??= { current: value }; },
-    useMemo: (fn) => fn(), useCallback: (fn) => fn,
+    useMemo(fn, deps) {
+      const id = cursor++, prev = slots[id];
+      if (prev && deps && deps.every((v, i) => Object.is(v, prev.deps[i]))) return prev.value;
+      const value = fn();
+      slots[id] = { deps, value };
+      return value;
+    },
+    useCallback(fn, deps) { return mockReact.useMemo(() => fn, deps); },
     useDeferredValue: (val) => val, useTransition: () => [false, (fn) => fn()],
     useEffect(callback, deps) {
       const id = cursor++, prev = slots[id];
@@ -124,7 +131,10 @@ async function makeHarness(overrides = {}) {
   }, {
     Date: Clock, Blob, Error, MediaRecorder: Recorder, WebSocket: Socket,
     Math: Object.assign(Object.create(Math), { random: () => 0.42 }),
-    window, navigator: { mediaDevices: { getUserMedia: async () => stream } },
+    window, navigator: { mediaDevices: { getUserMedia: async constraints => {
+      mediaCalls.push(constraints);
+      return stream;
+    } } },
     requestAnimationFrame(fn) { frames.push(fn); return frames.length; },
     cancelAnimationFrame() {}
   });
@@ -147,7 +157,7 @@ async function makeHarness(overrides = {}) {
   const recordButton = () => find((node) => node.type === "button" &&
     typeof node.props?.className === "string" && node.props.className.includes("record"));
   return {
-    sends, transcriptions, recorders, tracks, sockets, api, find, settle,
+    sends, transcriptions, recorders, tracks, sockets, api, mediaCalls, find, settle,
     socket() { return sockets.at(-1); },
     async openSocket() { this.socket().open(); await settle(); },
     async closeSocket() { this.socket().disconnect(); await settle(); },
@@ -535,4 +545,37 @@ test("TTS echo: short assistant 'Jarvis' must not open the wakeword window", asy
   await app.timer(80);
   await app.finish("Öffne Spotify");
   assert.deepEqual(app.sends, []);
+});
+
+
+test("memoized Command Palette and Chat button always use the latest selected microphone", async () => {
+  const app = await makeHarness();
+  await app.openSocket();
+  const palette = () => app.find(node => Array.isArray(node.props?.items) &&
+    node.props.items.some(item => item.id === "toggle-voice-input"));
+  const invoke = id => {
+    const item = palette()?.props.items.find(entry => entry.id === id);
+    assert.ok(item, "missing command " + id);
+    item.run();
+  };
+  invoke("nav-settings");
+  await app.settle();
+  const settings = () => app.find(node => typeof node.props?.onSelectMic === "function");
+  assert.ok(settings(), "real App mounts selected settings");
+  settings().props.onSelectMic("usb-mic");
+  await app.settle();
+  settings().props.onSelectMic("builtin-mic");
+  await app.settle();
+  invoke("nav-chat");
+  await app.settle();
+  invoke("toggle-voice-input");
+  await app.settle();
+  assert.equal(app.mediaCalls.length, 1);
+  assert.equal(app.mediaCalls[0].audio.deviceId.exact, "builtin-mic");
+  await app.stop();
+  await app.start();
+  assert.equal(app.mediaCalls.length, 2);
+  assert.equal(app.mediaCalls[1].audio.deviceId.exact, "builtin-mic");
+  assert.equal(app.recorders.length, 2, "no concurrent duplicate recorder");
+  await app.stop();
 });

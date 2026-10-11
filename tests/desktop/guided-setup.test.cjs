@@ -16,7 +16,7 @@ test("installation status preserves interruption and rejects invented progress",
 
 test("walkthrough offers individual and complete installs with accessible selections", () => {
   const calls = [];
-  const hooks = { ...React, useState: value => [value, () => {}], useEffect() {}, useRef: value => ({ current: value }) };
+  const hooks = { ...React, useState: init => [typeof init === "function" ? init() : init, () => {}], useEffect() {}, useRef: value => ({ current: value }) };
   const { GuidedInstaller } = load("GuidedInstaller.tsx", {
     react: hooks,
     "../api": { setupInstallation: async (action, selection) => { calls.push({ action, selection }); return { status: "running" }; } }
