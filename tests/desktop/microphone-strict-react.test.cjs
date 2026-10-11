@@ -194,7 +194,11 @@ test("actual React.StrictMode setup-cleanup-setup still starts microphone, meter
     assert.equal(requests.length, 1);
     assert.equal(requests[0].audio.deviceId.exact, "mic-usb");
     assert.equal(recorders.length, 1, "a recorder really started after strict effect replay");
-    for (const callback of [...intervals.values()]) callback();
+    // React 18 batches state updates. The real analyzer interval must run in
+    // act(), otherwise the text assertion observes the preceding render.
+    await require("react-dom/test-utils").act(async () => {
+      for (const callback of [...intervals.values()]) callback();
+    });
     assert.match(text(), /Signal erkannt/);
     await press("Test beenden");
     assert.match(text(), /nicht-leerer MediaRecorder-Blob/);
