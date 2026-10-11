@@ -22,7 +22,7 @@ type ActiveTest = {
 
 export function MicrophoneSettings({
   selectedId, onSelect, voiceActive, onDeviceUnavailable, sttAvailable,
-  onStartVoiceTest, voiceStage
+  onStartVoiceTest, voiceStage, onHardwareTested
 }: {
   selectedId: string;
   onSelect: (id: string) => void;
@@ -31,6 +31,7 @@ export function MicrophoneSettings({
   sttAvailable: boolean;
   onStartVoiceTest?: () => void;
   voiceStage?: string;
+  onHardwareTested?: (passed: boolean) => void;
 }) {
   const [devices, setDevices] = useState<Array<{ id: string; label: string }>>([]);
   const [deviceState, setDeviceState] = useState<"loading" | "ready" | "empty" | "error">("loading");
@@ -221,7 +222,8 @@ export function MicrophoneSettings({
     let context: AudioContext | null = null;
     try {
       setMode(chosen); setPhase("starting"); setError(""); setResult(""); setLevel(0);
-      setSignalSeen(false); setHardwarePassed(false); setTranscript(""); setLatencyMs(null); setFormat("");
+      setSignalSeen(false); setHardwarePassed(false); onHardwareTested?.(false);
+      setTranscript(""); setLatencyMs(null); setFormat("");
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("MediaDevices/getUserMedia nicht verfügbar.");
       stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints(selectedRef.current));
       if (!alive.current || current !== generation.current) return;
@@ -276,6 +278,7 @@ export function MicrophoneSettings({
         }
         if (test.mode === "hardware") {
           setHardwarePassed(true);
+          onHardwareTested?.(true);
           setResult("MediaStream, aktiver Track, Audio-Pegel und nicht-leerer MediaRecorder-Blob bestätigt. Keine Audiodaten hochgeladen.");
           setPhase("complete"); return;
         }

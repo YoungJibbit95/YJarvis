@@ -25,3 +25,100 @@
 ## P1 redesign and final CI
 
 (To be completed in the next commit on this same branch. No premature PASS until a real 7/7 PR-head Baseline CI and successful Wiki validation.)
+
+
+## P1 — Implemented Settings workbench and actionable model/voice discovery
+
+The previous YJUX-01 Settings view had a horizontal tab row and many technically
+accurate but largely form-based selectors. The **active** App component continues
+to render exactly one `IntelligentSettings` instance. YJUX-02 makes it a
+responsive workbench with a compact sidebar and a real **Übersicht** landing page.
+
+The Übersicht contains four source-backed status cards:
+- **Mikrofon:** default vs user-selected device, plus "hardware not tested" until
+  an actual successful local MediaRecorder test in the current Settings session.
+  Changing/disconnecting a selected device invalidates that evidence.
+- **Chat-Modell:** active **saved** model, count of models reported by the
+  configured Ollama `/api/tags` inventory and backend reachability. Presence
+  is explicitly **not** successful inference.
+- **Spracherkennung:** existing Setup readiness plus actual Whisper CLI and
+  FFmpeg presence. Being found does not imply a successful recording.
+- **Sprachausgabe:** known paired Piper voice files and saved backend engine.
+  Playback remains unverified until the user requests an actual preview.
+
+Each card navigates directly to a related workflow. The independent
+**Spracheingabe** page still mounts the actual `MicrophoneSettings` component
+with permission recovery, actual media-device selection, audio analyzer/recorder,
+separate Whisper upload and the existing explicitly activated Wakeword test.
+
+The **KI & Modelle** page includes searchable selection cards for the real
+installed Ollama models and a separate catalog-derived set of models which
+are *known/installable but not currently installed*. Cards show the exact
+backend ID and size only when the source supplies it. The existing native
+select remains as an accessible fallback; selecting only updates
+`settingsDraft`, never the saved model.
+
+The **Whisper** page has separate cards for verified present model *files*
+and supported models from `fetchInstallOptions`. The latter are explicitly
+uninstalled choices, not imaginary local assets. Whisper status continues to
+come from the existing setup/readiness checks.
+
+The **Sprachausgabe** page offers cards for full Piper `.onnx` +
+`.onnx.json` pairs reported by `/v1/setup/inventory`, the previously supported
+macOS `say` voices and a searchable subset of the existing Piper
+`/v1/setup/install/options` catalog. A voice is not reported as successfully
+heard just because its files exist. An explicit `speak` preview uses the
+**saved** engine and voice; unsaved selections must be saved before preview.
+
+**Installation** is still the existing `GuidedInstaller` and
+`SetupInstaller`. An install card opens the same in-page install workspace
+with one verified catalog ID preselected, but **never starts a download on
+opening**. The user still explicitly presses the existing Install button,
+with the same progress/cancellation/verification and error behavior. Existing
+model catalog license/source details are accessed through the same
+`ModelCatalogBrowser`. No new installer, package sources or V2 runtime wiring
+was created.
+
+**Drafts and security:** Settings navigation does not discard a draft.
+The persistent footer shows dirty/saving/error/saved states, provides
+`Änderungen speichern` and `Verwerfen` controls and displays save
+errors without faking success. Navigating to a different *app* tab with a
+dirty draft invokes an explicit confirmation where available. Custom model
+tags, original technical paths, pronunciation and file access allowlists
+remain in **System & Erweitert**. The existing installer `configured_fields`
+mechanism merges only expressly installed component values; unrelated
+unsaved preferences are not silently replaced. No SQL migration or arbitrary
+file scan is introduced.
+
+### UI and regression verification
+
+- Desktop tests exercise the live Settings component through the existing
+  React test harness: overview/click-through, actual inventory-based choice
+  cards, verified catalog-only install choices with no automatic save/install,
+  missing/offline model, Whisper/Piper cards, saved voice preview gating,
+  save/discard and preservation of custom allowed paths, plus retry/error.
+- StrictMode tests use real ReactDOM `StrictMode` setup-cleanup-setup with
+  temporary global property **descriptors** restored even when a test fails.
+  Audio meter simulation is executed inside React `act()` so the actual
+  analyzer state reaches the rendered DOM.
+- The Windows packaging VM loads the **real**
+  `microphone-recovery.cjs` into Electron's main process, with a fixed
+  Settings URI shell mock and positive/negative trusted-webContents IPC tests.
+  Camera, screen capture and arbitrary URI execution remain blocked.
+
+GitHub Actions final-head CI and Wiki links, exact pass counts, and the
+reviewed diff should be recorded in PR #41 after those runs conclude.
+
+## Verification boundaries and rollback
+
+Physical Windows 11 privacy settings, real microphone input and USB hot
+unplug, macOS packaged TCC, actual Whisper/Wakeword and speaker output were
+**NOT RUN** in this connector-only environment. Do not mistake headless
+React/MediaRecorder mocks or installer smoke for real audio hardware.
+The on-device instructions above remain required before claiming full
+microphone reliability on a specific computer.
+
+If and only if externally approved and merged, revert this single PR
+to undo the Settings and recovery corrections. No user databases, saved
+profiles, local Ollama models, downloaded Whisper/Piper assets or voice
+history are to be deleted. **External review and STOP before merge.**

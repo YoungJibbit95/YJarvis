@@ -6,8 +6,17 @@ const INITIAL: InstallState = { status: "idle", id: null, stage: "", completed: 
 const FALLBACK: InstallOptions = { whisper_models: ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"], voices: [{ id: "de_DE-thorsten-medium", name: "Deutsch · Thorsten · medium" }] };
 const size = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
-export function GuidedInstaller({ onConfigured }: { onConfigured: (fields: InstallField[]) => void }) {
-  const [selection, setSelection] = useState<InstallSelection>({ chat_model: "qwen2.5:3b-instruct", whisper_model: "small", voice: "de_DE-thorsten-medium", install_ollama: true });
+export function GuidedInstaller({
+  onConfigured, initialSelection
+}: {
+  onConfigured: (fields: InstallField[]) => void;
+  initialSelection?: Partial<InstallSelection>;
+}) {
+  const [selection, setSelection] = useState<InstallSelection>(() => ({
+    chat_model: "qwen2.5:3b-instruct", whisper_model: "small",
+    voice: "de_DE-thorsten-medium", install_ollama: true,
+    ...initialSelection,
+  }));
   const [state, setState] = useState(INITIAL);
   const [options, setOptions] = useState(FALLBACK);
   const [error, setError] = useState<string | null>(null);
@@ -20,6 +29,14 @@ export function GuidedInstaller({ onConfigured }: { onConfigured: (fields: Insta
   const onConfiguredRef = useRef(onConfigured);
   onConfiguredRef.current = onConfigured;
   const busy = state.status === "running" || submitting;
+
+  // A Settings install card preselects an existing, catalog-backed choice,
+  // but it never starts a download. The user still presses Install explicitly.
+  useEffect(() => {
+    if (!initialSelection || busy) return;
+    setSelection(previous => ({ ...previous, ...initialSelection }));
+  }, [initialSelection?.chat_model, initialSelection?.whisper_model,
+      initialSelection?.voice, initialSelection?.install_ollama, busy]);
 
   useEffect(() => {
     let active = true;

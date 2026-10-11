@@ -1344,11 +1344,15 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
 
   const switchTab = useCallback(
     (tab: TabId) => {
-      startTabTransition(() => {
-        setActiveTab(tab);
-      });
+      if (activeTab === "settings" && tab !== "settings" &&
+          JSON.stringify(settingsDraft) !== JSON.stringify(settings) &&
+          typeof window.confirm === "function" &&
+          !window.confirm("Du hast ungespeicherte Einstellungen. Ohne Speichern bleiben sie als Entwurf erhalten. Trotzdem den Bereich verlassen?")) {
+        return;
+      }
+      startTabTransition(() => { setActiveTab(tab); });
     },
-    [startTabTransition]
+    [startTabTransition, activeTab, settings, settingsDraft]
   );
 
   const handleSpeakMessage = useCallback((content: string) => {
@@ -1766,6 +1770,8 @@ function App({ setupCheck, onRecheckSetup }: { setupCheck: SetupCheck; onRecheck
       void onRecheckSetup();
     } catch (error) {
       reportFailure("action", "Einstellungen konnten nicht gespeichert werden", error);
+      // Keep the draft and propagate the result to the Settings save/status UI.
+      throw error;
     }
   }
 
