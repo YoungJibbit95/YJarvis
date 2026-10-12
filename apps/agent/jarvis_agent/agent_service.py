@@ -38,7 +38,7 @@ class AgentService:
             os.environ.get("JARVIS_ENABLE_TOOL_PLANNER", "0").strip().lower() in {"1", "true", "yes", "on"}
         )
         enable_llm_tool_summary = (
-            os.environ.get("JARVIS_TOOL_SUMMARY_VIA_LLM", "0").strip().lower() in {"1", "true", "yes", "on"}
+            os.environ.get("JARVIS_TOOL_SUMMARY_VIA_LLM", "1").strip().lower() in {"1", "true", "yes", "on"}
         )
         token_flush_interval_seconds = max(
             0.01,

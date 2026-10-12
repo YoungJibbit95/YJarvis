@@ -181,9 +181,10 @@ async def complete_chat(
     messages: list[dict[str, str]],
     temperature: float = 0.2,
     timeout_seconds: float = 180.0,
+    text_only: bool = False,
 ) -> str:
     url = f"{base_url.rstrip('/')}/api/chat"
-    payload = {
+    payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "stream": False,
@@ -191,21 +192,47 @@ async def complete_chat(
     }
     if DEFAULT_OLLAMA_KEEP_ALIVE:
         payload["keep_alive"] = DEFAULT_OLLAMA_KEEP_ALIVE
+    if text_only:
+        payload["options"]["num_predict"] = 256
 
     timeout = httpx.Timeout(connect=10.0, read=timeout_seconds, write=30.0, pool=30.0)
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        # Only the narration pilot opts into this stricter transport. Preserve
+        # the existing planner/completion contracts for other callers.
+        client_options = {"trust_env": False, "follow_redirects": False} if text_only else {}
+        async with httpx.AsyncClient(timeout=timeout, **client_options) as client:
             response = await client.post(url, json=payload)
     except httpx.HTTPError as error:
         raise LlmError(_friendly_ollama_error(base_url, error)) from error
 
-    if response.status_code >= 400:
+    if response.status_code >= 400 or (text_only and response.status_code != 200):
         raise LlmError(
             f"Ollama completion error {response.status_code}: {response.text}"
         )
 
-    data = response.json()
+    try:
+        data = (json.loads(response.content, object_pairs_hook=_unique_json_fields)
+                if text_only else response.json())
+    except ValueError as error:
+        if text_only:
+            raise LlmError("Ungueltige oder mehrdeutige Narration-JSON-Antwort") from error
+        raise
+    if text_only:
+        if (not isinstance(data, dict) or data.get("done") is not True
+                or data.get("tool_calls") not in (None, []) or "function_call" in data):
+            raise LlmError("Unvollstaendige Narration-Antwort")
+        message = data.get("message")
+        if (not isinstance(message, dict) or message.get("role") != "assistant"
+                or message.get("tool_calls") not in (None, [])
+                or "function_call" in message
+                or not isinstance(message.get("content"), str)
+                or not message["content"].strip()
+                or data.get("done_reason") not in (None, "stop")):
+            raise LlmError("Ungueltige Textantwort oder unerlaubter Tool-Aufruf")
+        # The narration boundary validates exactly what will be published,
+        # including whitespace/control characters; do not sanitize it first.
+        return message["content"]
     return str(data.get("message", {}).get("content", "")).strip()
 
 

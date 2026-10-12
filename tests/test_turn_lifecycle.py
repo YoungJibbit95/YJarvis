@@ -225,7 +225,13 @@ def test_learning_trigger_approval_execution_persistence_and_metrics(rig, succes
         rig.tools.execute.assert_awaited_once()
         assert (await rig.db.get_approval(approval_id))["status"] == "approved"
         assert event_order(rig) == ["executing", "message", "done" if success else "error"]
-        assert ("Erledigt" if success else "offline") in rig.events[1]["content"]
+        if success:
+            assert rig.events[1]["content"] == (
+                "ToolResult meldet Erfolg (open_app). "
+                "Eine geprüfte Rückmeldung zum Öffnungsbefehl ist nicht verfügbar."
+            )
+        else:
+            assert "offline" in rig.events[1]["content"]
         assert rig.trace == [
             "db:resolve_approval", "event:executing", "tool:execute", "db:add_tool_run",
             "db:record_tool_learning", "db:record_learned_command_result",
@@ -382,9 +388,19 @@ def test_heuristic_route_precedes_enabled_planner(rig):
     rig.planner.assert_not_awaited()
 
 
-@pytest.mark.parametrize("summary", ["Erledigt, mein Herr.", "", RuntimeError("offline")])
+@pytest.mark.parametrize("summary", [
+    'Der Öffnungsbefehl für die App "Safari" wurde erfolgreich ausgeführt, Sir.', "", RuntimeError("offline"),
+])
 def test_optional_tool_summary_and_fallback(rig, summary):
     rig.service = rig.enable("JARVIS_TOOL_SUMMARY_VIA_LLM")
+    original = rig.tools.execute.side_effect
+
+    async def execute(**kwargs):
+        result = await original(**kwargs)
+        result.output = "App geoeffnet: Safari"
+        return result
+
+    rig.tools.execute.side_effect = execute
     rig.summary.side_effect = summary if isinstance(summary, Exception) else None
     rig.summary.return_value = summary
 
@@ -393,7 +409,10 @@ def test_optional_tool_summary_and_fallback(rig, summary):
         await rig.service.handle_approval_decision(approval_id, "approve")
         rig.summary.assert_awaited_once()
         assert rig.summary.call_args.kwargs["temperature"] == 0.1
-        expected = "Erledigt, Sir." if summary == "Erledigt, mein Herr." else "Tool `open_app` ausgefuehrt. Ergebnis: Erledigt"
+        expected = summary if isinstance(summary, str) and summary else (
+            'OS-Öffnungsbefehl erfolgreich abgeschlossen (open_app). Ziel: "Safari". '
+            'Fenster- oder Seitenzustand wurde nicht geprüft.'
+        )
         assert rig.events[-2]["content"] == expected
 
     asyncio.run(check())

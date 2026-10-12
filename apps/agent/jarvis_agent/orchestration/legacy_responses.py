@@ -15,6 +15,9 @@ from ..llm import LlmError, ModelToolCall, complete_chat, stream_chat
 from ..memory import load_context_snippets, maybe_compact_session
 from ..profile import build_persona_system_prompt
 from ..runtime_facts import ReadOnlyToolkit, required_live_fact_tool
+from ..tools.base import ToolResult
+from .tool_narration import local_narration_endpoint, narration_messages, valid_narration
+from .tool_narration import NARRATION_TIMEOUT_SECONDS, PILOT_TOOL_NAMES, narration_evidence, technical_pilot_response
 
 
 def utc_now_iso() -> str:
@@ -162,47 +165,47 @@ class LegacyResponses:
         profile: dict[str, Any],
         tool_name: str,
         tool_input: dict[str, Any],
-        tool_output: str,
+        tool_result: ToolResult,
+        user_intent: str | None = None,
     ) -> str:
-        base_url = str(settings.get("ollama_base_url", "http://127.0.0.1:11434"))
-        model = str(settings.get("model_name", "qwen2.5:3b-instruct"))
-
-        prompt_messages = [
-            {
-                "role": "system",
-                "content": (
-                    build_persona_system_prompt(profile)
-                    + "\nFormuliere eine kurze deutsche Rueckmeldung zur Tool-Ausfuehrung."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Tool: {tool_name}\n"
-                    f"Input: {tool_input}\n"
-                    f"Output: {tool_output}\n"
-                    "Antworte in 1-3 Saetzen."
-                ),
-            },
-        ]
-
-        if not self.enable_llm_tool_summary:
-            return normalize_honorifics(f"Aktion abgeschlossen ({tool_name}). Ergebnis: {tool_output}")
+        if tool_result.success is not True or tool_result.error is not None:
+            return normalize_honorifics(
+                f"Tool fehlgeschlagen ({tool_name}): {tool_result.error or 'Unbekannter Fehler'}"
+            )
+        tool_output = tool_result.output
+        technical_result = normalize_honorifics(f"Aktion abgeschlossen ({tool_name}). Ergebnis: {tool_output}")
+        evidence = narration_evidence(tool_name, tool_input, tool_result)
+        if tool_name in PILOT_TOOL_NAMES:
+            technical_result = technical_pilot_response(tool_name, evidence)
+        if not self.enable_llm_tool_summary or evidence is None:
+            return technical_result
 
         try:
-            response = await complete_chat(
-                base_url=base_url,
-                model=model,
-                messages=prompt_messages,
-                temperature=0.1,
-                timeout_seconds=20.0,
+            base_url = local_narration_endpoint(str(settings.get("ollama_base_url", "http://127.0.0.1:11434")))
+            messages = narration_messages(
+                profile=profile, evidence=evidence, tool_input=tool_input,
+                result=tool_result, user_intent=user_intent,
             )
-            if response.strip():
-                return normalize_honorifics(response)
+            model = str(settings.get("model_name", "qwen2.5:3b-instruct")).strip()
+            if base_url is None or messages is None or model.lower().endswith((":cloud", "-cloud")):
+                return technical_result
+            # One completion, bounded over the whole request as well as reads.
+            # Narration failure must never retry or reclassify the actual tool.
+            async with asyncio.timeout(NARRATION_TIMEOUT_SECONDS):
+                response = await complete_chat(
+                    base_url=base_url,
+                    model=model,
+                    messages=messages,
+                    temperature=0.1,
+                    timeout_seconds=NARRATION_TIMEOUT_SECONDS,
+                    text_only=True,
+                )
+            if valid_narration(response, evidence):
+                return response
         except Exception:
             pass
 
-        return normalize_honorifics(f"Tool `{tool_name}` ausgefuehrt. Ergebnis: {tool_output}")
+        return technical_result
 
     async def stream_response(
         self,

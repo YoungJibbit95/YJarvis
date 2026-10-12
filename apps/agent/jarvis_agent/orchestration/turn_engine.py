@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
@@ -14,6 +15,7 @@ from ..memory import maybe_compact_session
 from ..tools import ToolRegistry
 from .legacy_responses import LegacyResponses
 from .legacy_routing import LegacyRouting
+from .tool_narration import MAX_INTENT_CHARS, MAX_PENDING_INTENTS
 
 
 class TurnEngine:
@@ -32,6 +34,9 @@ class TurnEngine:
         self.routing = routing
         self.responses = responses
         self._load_profile = load_profile
+        # Optional response context only: no change to durable approvals. Never
+        # infer an old run's intent from the latest session message after restart.
+        self._narration_intents: OrderedDict[str, tuple[str, str, str]] = OrderedDict()
 
     async def start_run(self, session_id: str, run_id: str, user_message: str) -> None:
         await self.db.add_message(session_id=session_id, role="user", content=user_message)
@@ -58,6 +63,10 @@ class TurnEngine:
                 tool_name=intent.tool_name,
                 tool_input=intent.tool_input,
             )
+            if self.responses.enable_llm_tool_summary and len(route.user_message) <= MAX_INTENT_CHARS:
+                self._narration_intents[approval["id"]] = (session_id, run_id, route.user_message)
+                if len(self._narration_intents) > MAX_PENDING_INTENTS:
+                    self._narration_intents.popitem(last=False)
             await self.responses.emit_state(
                 session_id=session_id,
                 run_id=run_id,
@@ -84,6 +93,7 @@ class TurnEngine:
         learned_trigger = self.learning.pop_pending_trigger(run_id)
 
         if decision == "deny":
+            self._narration_intents.pop(approval_id, None)
             await self.db.resolve_approval(
                 approval_id=approval_id,
                 status="denied",
@@ -98,6 +108,9 @@ class TurnEngine:
 
         if decision != "approve":
             raise ValueError("Ungueltige Entscheidung")
+
+        context = self._narration_intents.pop(approval_id, None)
+        user_intent = context[2] if context is not None and context[:2] == (session_id, run_id) else None
 
         await self.db.resolve_approval(
             approval_id=approval_id,
@@ -151,7 +164,8 @@ class TurnEngine:
                 profile=profile,
                 tool_name=tool_name,
                 tool_input=tool_input,
-                tool_output=tool_result.output,
+                tool_result=tool_result,
+                user_intent=user_intent,
             )
             await self.responses.finish(
                 session_id, run_id, assistant_text,
