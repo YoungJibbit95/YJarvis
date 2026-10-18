@@ -221,6 +221,8 @@ Core integration. No UI file is changed by the Core diff. GitHub reports Main
 as unprotected; green CI alone is not external review.
 
 **Separate approval-concurrency security finding (not fixed in this scope):**
+The subsequent [YJSEC-01 security step](atomic-approval-claim-yjsec-01.md)
+addresses this finding in its own PR; the following describes the YJCORE-01 baseline.
 `handle_approval_decision` reads pending status, then separately calls
 `resolve_approval` before execution. Two concurrent decisions can both observe
 pending before either resolves; the current update is not an atomic conditional
