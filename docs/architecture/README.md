@@ -29,6 +29,9 @@ Operational entry points: [development setup](../development.md),
 [contribution/review protocol](../../CONTRIBUTING.md), and
 [agent guardrails](../../AGENTS.md).
 
+Current isolated security step: [YJSEC-01 atomic approval claim](atomic-approval-claim-yjsec-01.md),
+including explicit authorization, concurrency proof and crash/restart limits.
+
 ## Accepted handoff updates (2026-10-07)
 
 The user authorized Codex implementation and small, releasable PR cycles with

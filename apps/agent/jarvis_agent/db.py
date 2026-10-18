@@ -555,17 +555,27 @@ class Database:
         approval_id: str,
         status: str,
         decision: str,
-    ) -> None:
+    ) -> bool:
+        """Claim a pending decision once; True requires a completed commit.
+
+        The conditional write is the authority across connections/processes.
+        An approved row records permission, not proof of external execution.
+        """
+        if (status, decision) not in {("approved", "approve"), ("denied", "deny")}:
+            raise ValueError("Ungueltige Entscheidung")
         async with self._connect() as connection:
-            await connection.execute(
+            cursor = await connection.execute(
                 """
                 UPDATE approvals
                 SET status = ?, decision = ?, decided_at = ?
-                WHERE id = ?
+                WHERE id = ? AND status = 'pending'
                 """,
                 (status, decision, utc_now_iso(), approval_id),
             )
+            claimed = cursor.rowcount == 1
+            await cursor.close()
             await connection.commit()
+            return claimed
 
     async def add_tool_run(
         self,

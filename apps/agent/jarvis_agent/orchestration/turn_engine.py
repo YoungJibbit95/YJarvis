@@ -86,6 +86,15 @@ class TurnEngine:
         if approval.get("status") != "pending":
             raise ValueError("Approval wurde bereits entschieden")
 
+        if decision not in {"approve", "deny"}:
+            raise ValueError("Ungueltige Entscheidung")
+
+        # Reading pending is not permission. Only the committed database claim
+        # authorizes consuming context, executing, or publishing a final result.
+        status = "approved" if decision == "approve" else "denied"
+        if not await self.db.resolve_approval(approval_id=approval_id, status=status, decision=decision):
+            raise ValueError("Approval wurde bereits entschieden")
+
         session_id = str(approval["session_id"])
         run_id = str(approval["run_id"])
         tool_name = str(approval["tool_name"])
@@ -94,11 +103,6 @@ class TurnEngine:
 
         if decision == "deny":
             self._narration_intents.pop(approval_id, None)
-            await self.db.resolve_approval(
-                approval_id=approval_id,
-                status="denied",
-                decision="deny",
-            )
             denied_text = normalize_honorifics(f"Aktion abgelehnt: {tool_name}. Es wurde nichts ausgefuehrt.")
             await self.responses.finish(
                 session_id, run_id, denied_text,
@@ -106,17 +110,8 @@ class TurnEngine:
             )
             return "denied"
 
-        if decision != "approve":
-            raise ValueError("Ungueltige Entscheidung")
-
         context = self._narration_intents.pop(approval_id, None)
         user_intent = context[2] if context is not None and context[:2] == (session_id, run_id) else None
-
-        await self.db.resolve_approval(
-            approval_id=approval_id,
-            status="approved",
-            decision="approve",
-        )
 
         await self.responses.emit_state(
             session_id=session_id,
