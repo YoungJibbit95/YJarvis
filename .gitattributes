@@ -1,3 +1,5 @@
 # Bash installers must keep LF even in native Windows checkouts.
 setup/*.sh text eol=lf
 setup/windows.bat text eol=crlf
+# Normative NXB-0 corpus bytes must remain LF on every checkout.
+tests/fixtures/local-integration-v1/*.json text eol=lf
