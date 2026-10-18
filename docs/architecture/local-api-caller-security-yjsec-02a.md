@@ -20,12 +20,82 @@ reason: 27 registrations, 30 HTTP method entries and one WebSocket CONNECT entry
 CONNECT denotes the WebSocket surface in the inventory, not a new HTTP method.
 Four framework documentation/schema registrations include both GET and HEAD.
 
-`tests/test_local_api_inventory.py` imports the actual application in a disposable
-process with temporary runtime paths, without startup handlers or serving a port.
-It compares exact transport/method/path/handler multiplicities. New, deleted,
-duplicated or changed routes and unknown/mounted applications fail the gate.
+`tests/test_local_api_inventory.py` runs the actual application in a disposable
+`python -I -B` process with an allowlisted environment and explicit synthetic
+configuration. It compares exact transport/method/path/handler multiplicities
+before startup, inside the real FastAPI lifespan context after startup, and after
+controlled shutdown. This executes the existing database migrations/default seeding,
+profile creation and setup startup/shutdown against temporary files, without
+starting an HTTP/WS server. New, deleted, duplicated or changed registrations and
+unknown/mounted applications fail the gate, including late startup/lifespan routes.
 These are route-coverage tests, **not evidence that routes enforce authentication**.
-The test also checks minimal health contents and existing CORS configuration.
+The worker confirms database initialization, temporary profile creation, completed
+shutdown, no remaining tasks/threads, minimal health contents, existing CORS and
+absence of productive auth imports. Guarded application execution cannot create
+sockets, resolve DNS, start child processes, open a database outside scratch, read
+personal runtime/config files, or write outside scratch. Reads are limited to
+scratch and source/toolchain roots; isolated Python disables user-site imports and
+bytecode writes. Seven audit-only negative controls verify these restrictions
+without performing the forbidden operation. The event loop is created before the
+guards; application lifespan never needs new sockets. These Python audit guards
+are fixture controls for trusted source, not an OS sandbox for hostile native code.
+
+Synthetic regressions cover both startup handlers and custom lifespan contexts,
+late HTTP/WebSocket registrations, duplicates and mounts. They verify cleanup
+when the inventory comparison fails. They supplement, rather than replace, the
+actual application's post-startup comparison.
+
+## Inventory version 2: field definitions and planned ownership
+
+The JSON is declarative test/review data only. Strict, closed Pydantic models in
+the inventory test validate types and reject unknown fields; an independent exact
+route/method policy matrix rejects incompatible combinations and unreviewed routes.
+Neither these test models nor the policy data are imported by production code.
+
+| Field | Type and meaning |
+| --- | --- |
+| `inventoryVersion` | Integer `2`; inventory metadata revision, unrelated to Nexus wire/schema versions. |
+| `baselineMain` | Exact inspected baseline Git SHA. |
+| `enforcement` | `planned-only-no-productive-authentication`; describes the real unchanged product state. |
+| `routes` | Array of the 27 explicit registration records below. |
+| `syntheticSurfaces` | Separate descriptions of `corsPreflight`, `slashRedirects`, `unmatchedRequests`; no executable exemptions. |
+| `transport` | `http` or `websocket`. |
+| `methods` | Nonempty, sorted, unique array of `GET`, `HEAD`, `POST`, `PUT`, `DELETE`, `CONNECT`, restricted to each reviewed route. |
+| `path` / `handler` | Nonempty exact registered path and module/function identity; compared against actual registry multiplicities. |
+| `protection` | `caller_required` or, only for GET `/health`, `bootstrap_liveness_only`. |
+| `currentGuard` | Actual current caller-related guard: `none` or install POST/DELETE `origin_only`; neither is caller authentication. |
+| `reason` | Nonempty explanation of protection need and actual data/side effects. |
+| `policyStage` | Always `future_yjsec_02b`: caller and ownership requirements are not enforced or persisted by 02A. |
+| `caller.allowedType` | `public_liveness` only for health; otherwise `authenticated_desktop_main`. Other client roles require explicit future review. |
+| `caller.identitySource` | `none` for health; otherwise `future_trusted_backend_caller_and_profile_binding`, obtained from trusted authentication/provisioning, never Origin, URL, request ownership claims or session-ID knowledge. |
+| `ownership.kind` | `none`, `global_metadata`, `profile`, `new_session`, `session`, `owned_session_collection`, `approval_session`. |
+| `ownership.resourceIdentitySource` | `none`, `trusted_backend_profile`, `server_generated_session_id`, `path.session_id`, `body.session_id`, `database.approvals.session_id`, `path.approval_id_resolved_server_side`. Selectors identify resources, never prove ownership. |
+| `ownership.ownerIdentitySource` | `not_applicable_liveness`, `not_applicable_global_metadata`, `future_backend_profile_caller_binding`, `future_session_owner_record`, or `database.approvals.session_id_and_future_session_owner_record`. |
+| `ownership.requiredCheck` | One of the seven exact checks in the matrix below, matched to the route/selector/owner-source combination. |
+| `ownership.reason` | Nonempty per-registration explanation, including explicit reasons for non-session/global/profile scope. |
+
+All authenticated callers must be bound to the backend's trusted local profile.
+An externally managed backend still requires a securely provisioned desktop Main
+identity; external management is not an additional anonymous/admin caller role.
+The future session-owner record must authoritatively bind a session to the verified
+caller identity and backend profile, not to a bearer token, generation or supplied
+owner field. Its schema, persistence, migration and restart/rotation identity policy
+are **unimplemented YJSEC-02B work**. The current sessions schema does not store this
+binding. `approvals.session_id` already exists, but does not itself authorize a caller.
+
+| Ownership / routes | Required check and authoritative source |
+| --- | --- |
+| `none`: GET `/health` | `fixed_liveness_without_authority`: no owner/session/profile state. |
+| `global_metadata`: docs/schema GET/HEAD and GET `/v1/setup/models` | `authenticate_profile_caller_without_session_owner`: static schema/catalog has no session owner; a verified profile-bound Main caller is still mandatory. |
+| `profile`: settings, audio, Smart Home, setup inspection and installation | `match_caller_to_backend_profile`: use trusted backend-profile/caller binding; these endpoints are explicitly not session-bound. Host effects do not grant OS administration rights. |
+| `new_session`: POST `/v1/sessions` | `persist_authenticated_caller_and_profile_before_publish`: attach the generated ID to the verified caller/profile before returning or publishing it. |
+| `session`: messages and WebSocket `path.session_id`, chat `body.session_id` | `resolve_session_and_match_caller_and_profile`: resolve the selected session's future persisted owner record and compare verified caller/profile before data, run creation or WS accept/EventBus registration. |
+| `owned_session_collection`: GET `/v1/approvals/pending` | `filter_approvals_to_owned_sessions_before_return`: resolve each stored `approvals.session_id`, check its session owner, and return only authorized sessions' approvals. |
+| `approval_session`: POST `/v1/approvals/{approval_id}` | `resolve_approval_session_owner_before_existing_claim`: resolve the authoritative approval record to its stored session, check that session's owner, then retain the existing separate approval/policy/atomic-claim gates. A supplied approval ID is not permission. |
+
+No current endpoint, persistence or approval-claim behavior is changed. Caller
+authentication, resource ownership and tool/approval authorization remain distinct
+gates. These fields neither implement ownership nor claim that D13 is complete.
 
 Current caller authentication: **none**. Setup install POST/DELETE have only an
 Origin allowlist. Native local clients can supply that header. Loopback, matching
@@ -119,7 +189,9 @@ WebSocket construction exposes URL/subprotocol parameters, not an arbitrary head
 API; a coordinated Main-owned transport avoids putting a secret in either.
 [WebSocket constructor](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket/WebSocket)
 
-02B acceptance scope: complete HTTP/WS enforcement against this inventory; strict
+02B acceptance scope: complete HTTP/WS enforcement and authoritative caller/profile/
+session/approval ownership against this inventory, including new-session binding
+and filtering pending approvals; strict
 unambiguous header parsing; Main/preload broker and renderer migration; secure
 bootstrap/peer binding in every supported lifecycle; current-state revocation,
 generation/TTL rotation and socket invalidation; narrowly bounded health/preflight
@@ -135,6 +207,10 @@ then the complete Python/Ruff, Startup, Desktop and CI baseline in CONTRIBUTING.
 Tests create only ephemeral dummy material in memory; no credential fixture is
 saved. The route inventory is exercised without live endpoints or downloads.
 Isolation tests prohibit productive imports and audit cold import for resource work.
+P2-1 regressions reject missing/unknown metadata, untrusted caller/owner sources,
+invalid stage/type values and validly typed but incompatible ownership combinations.
+P2-2 regressions cover startup and lifespan registry drift plus shutdown/resource
+evidence from the actual app. All original 97 cases remain; no verifier change.
 Digest comparison follows [Python hmac](https://docs.python.org/3.11/library/hmac.html#hmac.compare_digest);
 future issuance must use explicit strong randomness, e.g.
 [Python secrets](https://docs.python.org/3.11/library/secrets.html).
