@@ -274,6 +274,21 @@ def test_expiry_allows_only_explicit_rotation_to_fresh_material(setup):
     assert result.authenticated is True
 
 
+@pytest.mark.parametrize("revoke_at", [0, 100, 199, 200])
+def test_revocation_preserves_core_precedence_across_lifetime_boundaries(setup, revoke_at):
+    registry, clock, first = setup
+    clock.value = 0
+    registry.install(first.verifier, profile_id=PROFILE)
+    clock.value = revoke_at
+    registry.revoke()
+    for now in (revoke_at, 201):
+        clock.value = now
+        result = registry.authenticate(first.token)
+        assert result.status is AuthStatus.REVOKED
+        result = registry.authenticate(material().token)
+        assert result.status is AuthStatus.INVALID
+
+
 @pytest.mark.parametrize("configured", [False, True])
 def test_close_is_terminal_including_old_context_and_fresh_install(setup, configured):
     registry, _, first = setup

@@ -5,7 +5,7 @@ must be bounded, non-reentrant and share the verifier's backend timebase.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from threading import Lock
 
@@ -172,6 +172,8 @@ class CredentialRegistry:
         with self._lock:
             self._now()
             if self._state in (RegistryState.CONFIGURED, RegistryState.EXPIRED):
+                assert self._verifier is not None
+                self._verifier = replace(self._verifier, revoked=True)
                 self._state = RegistryState.REVOKED
                 self._epoch += 1
             return self._snapshot()
@@ -206,8 +208,6 @@ class CredentialRegistry:
                                     backend_generation=self._generation, now_ns=now)
             if not decision.authenticated:
                 return RegistryDecision(decision.status)
-            if self._state is RegistryState.REVOKED:
-                return RegistryDecision(AuthStatus.REVOKED)
             context = CallerContext(self._verifier.caller_id, self._profile,
                                     self._generation, self._epoch, self._tag)
             return RegistryDecision(AuthStatus.AUTHENTICATED, context)
