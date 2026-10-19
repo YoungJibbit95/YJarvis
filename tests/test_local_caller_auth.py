@@ -234,6 +234,11 @@ def test_core_is_stdlib_only_and_never_imported_by_product_modules():
             else:
                 continue
             if inside:
+                if (path == package / "registry.py" and isinstance(node, ast.ImportFrom)
+                        and node.level == 1 and node.module == "core"
+                        and {alias.name for alias in node.names} == {
+                            "AuthStatus", "CredentialVerifier", "_identifier", "_tick", "authenticate"}):
+                    continue  # The sole authorized B1 internal import edge.
                 assert all(name.split(".")[0] in sys.stdlib_module_names for name in names), path
             else:
                 assert all("caller_auth" not in name.split(".") for name in names), path
